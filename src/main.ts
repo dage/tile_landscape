@@ -1,10 +1,20 @@
-// src/main.ts
-// Project Entry Point
+// import './style.css'; // Basic styles, if any -- Removed as src/style.css was deleted
+import { App } from '@/App';
 
-console.log('Infinite-Tile Sci-Fi Landscape Demo Initialized - Entry Point');
+const canvas = document.getElementById(
+  'app-canvas'
+) as HTMLCanvasElement | null;
 
-// Phase 1: Visual fly-over will start here
-// - Basic Three.js scene
-// - Camera, lights
-// - Repeating tile grid
-// - Placeholder terrain
+if (!canvas) {
+  console.error('Canvas element #app-canvas not found!');
+} else {
+  const app = new App(canvas);
+  app.start();
+
+  // Optional: handle hot module replacement for dispose
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      app.dispose();
+    });
+  }
+}

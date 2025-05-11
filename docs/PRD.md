@@ -18,6 +18,7 @@ This document outlines the requirements for a browser-based demo showcasing an i
 - **Package manager:** npm (Node 20 LTS)
 - **Lint / Format:** ESLint + @typescript-eslint + Prettier
 - **Unit tests:** Vitest
+- **Visual Regression Tests (Basic):** Puppeteer (via `run-visual-test.ts` script)
 - **CI:** GitHub Actions
 
 ## 3. Core Features & Phases
@@ -87,15 +88,19 @@ This document outlines the requirements for a browser-based demo showcasing an i
 /public
  ├─ assets/             # GLTF, HDRI, textures (futuristic)
  └─ index.html
+/screenshots            # Directory for visual test screenshots
+ ├─ baseline.png
+ └─ current.png         # (typically in .gitignore)
 .github/
  └─ workflows/
     └─ ci.yml
 .vscode/
  └─ settings.json       # Recommended VSCode settings (e.g., format on save)
-.eslintrc.cjs
+eslint.config.js      # ESLint configuration (replaces .eslintrc.cjs)
 .prettierrc.json
 package.json
 README.md
+run-visual-test.ts     # Puppeteer script for visual testing
 docs/
  └─ PRD.md              # This document
 ```

@@ -61,6 +61,25 @@ This will typically open the application in your default browser at `http://loca
 - `npm run lint`: Lints the codebase using ESLint.
 - `npm run format`: Formats the codebase using Prettier.
 - `npm run test`: Runs unit tests using Vitest (once configured).
+- `node --loader ts-node/esm run-visual-test.ts`: Runs an automated visual test using Puppeteer. It starts the dev server, navigates to the app, and saves a screenshot to `screenshots/current.png`.
+
+## Visual Testing (Experimental)
+
+This project includes a basic visual regression testing setup using Puppeteer.
+
+1.  **Run the test:**
+    ```bash
+    node --loader ts-node/esm run-visual-test.ts
+    ```
+    This will generate a `screenshots/current.png` file.
+2.  **Establish a Baseline:**
+    - Inspect `screenshots/current.png`.
+    - If it's correct, copy it to `screenshots/baseline.png`.
+    - Commit `screenshots/baseline.png` to the repository.
+    - (`screenshots/current.png` should be in `.gitignore`).
+3.  **Subsequent Tests:**
+    - Run the test script again.
+    - Manually compare the new `screenshots/current.png` with the committed `screenshots/baseline.png` to detect any unintended visual changes.
 
 ## Folder Structure
 
@@ -80,6 +99,9 @@ This will typically open the application in your default browser at `http://loca
 /public
  ├─ assets/             # GLTF, HDRI, textures (futuristic)
  └─ index.html
+/screenshots
+ ├─ baseline.png        # Committed baseline image for visual tests
+ └─ current.png         # Current screenshot (ignored by git)
 .github/
  └─ workflows/
     └─ ci.yml           # GitHub Actions CI configuration
@@ -89,6 +111,7 @@ eslint.config.js      # ESLint configuration
 .prettierrc.json       # Prettier configuration
 package.json
 README.md              # This file
+run-visual-test.ts     # Puppeteer script for automated visual testing
 docs/
  └─ PRD.md              # Project Requirements Document
 ```
