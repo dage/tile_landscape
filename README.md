@@ -1,4 +1,5 @@
 # /README.md
+
 # Infinite-Tile Sci-Fi Landscape Demo
 
 This project is a browser-based demo that flies over an endlessly repeating, FFT-generated landscape. It aims to incorporate physics, LOSO objects, AI entities, and advanced instancing, targeting desktop and high-end mobile browsers (WebGL 2 / WebGPU-capable).
@@ -84,7 +85,7 @@ This will typically open the application in your default browser at `http://loca
     └─ ci.yml           # GitHub Actions CI configuration
 .vscode/
  └─ settings.json       # Recommended VSCode settings (e.g., format on save)
-.eslintrc.cjs          # ESLint configuration
+eslint.config.js      # ESLint configuration
 .prettierrc.json       # Prettier configuration
 package.json
 README.md              # This file
@@ -99,4 +100,4 @@ docs/
 - Worker IPC types declared in `types/ipc.ts` (to be created).
 - CI gate: build, ESLint (zero errors), Vitest.
 
-Refer to `docs/PRD.md` for more details. 
+Refer to `docs/PRD.md` for more details.
