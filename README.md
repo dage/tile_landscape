@@ -1,6 +1,6 @@
-# /README.md
-
 # Infinite-Tile Sci-Fi Landscape Demo
+
+[![CI](https://github.com/dage/tile_landscape/actions/workflows/ci.yml/badge.svg)](https://github.com/dage/tile_landscape/actions/workflows/ci.yml)
 
 This project is a browser-based demo that flies over an endlessly repeating, FFT-generated landscape. It aims to incorporate physics, LOSO objects, AI entities, and advanced instancing, targeting desktop and high-end mobile browsers (WebGL 2 / WebGPU-capable).
 
