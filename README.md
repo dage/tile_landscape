@@ -43,6 +43,30 @@ Detailed project requirements can be found in [docs/PRD.md](docs/PRD.md).
     npm install
     ```
 
+### Environment Setup (for MCP Vision Server)
+
+The MCP Vision Server (`src/server.ts`) uses Google's Generative AI.
+
+**For use with Cursor's AI features:**
+Cursor manages the `GOOGLE_API_KEY` for the MCP Vision server if it's configured within Cursor's settings (specifically, the `.cursor/mcp.json` file includes an `env` block where this key can be set). When you use features that rely on this server through the Cursor interface, Cursor provides the necessary environment variables.
+
+**For manual server execution (e.g., using `npm run start:mcp-server` directly):**
+If you intend to run the server manually from your terminal, you'll need to provide the `GOOGLE_API_KEY` via an `.env` file.
+
+1.  **Create a `.env` file (if running manually):**
+    Copy the template file `.env_template` to a new file named `.env` in the project root:
+    ```bash
+    cp .env_template .env
+    ```
+2.  **Add your API Key to `.env` (if running manually):**
+    Open the `.env` file and add your Google API key:
+    ```
+    GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY_HERE"
+    # You can also specify a different Gemini model if needed
+    # GEMINI_MODEL="gemini-1.5-flash"
+    ```
+    **Important:** Keep your `.env` file private and do not commit it to version control. The `.gitignore` file should already be configured to ignore `.env`.
+
 ### Development
 
 To start the development server:
@@ -62,6 +86,7 @@ This will typically open the application in your default browser at `http://loca
 - `npm run format`: Formats the codebase using Prettier.
 - `npm run test`: Runs unit tests using Vitest (once configured).
 - `node --loader ts-node/esm run-visual-test.ts`: Runs an automated visual test using Puppeteer. It starts the dev server, navigates to the app, and saves a screenshot to `screenshots/current.png`.
+- `npm run start:mcp-server`: Starts the Tiny MCP 'Vision' Server for AI-powered image analysis. For this script to work when run manually, it requires a `.env` file with `GOOGLE_API_KEY` (see Environment Setup). The server uses `tsx` and `tsconfig.mcp.json`.
 
 ## Visual Testing (Experimental)
 
@@ -114,6 +139,9 @@ README.md              # This file
 run-visual-test.ts     # Puppeteer script for automated visual testing
 docs/
  └─ PRD.md              # Project Requirements Document
+.env                   # Local environment variables (e.g., API keys, ignored by git)
+.env_template          # Template for .env file
+tsconfig.mcp.json      # TypeScript configuration for the MCP server
 ```
 
 ## Coding Standards

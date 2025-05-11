@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "vision": {
+      "command": "npx",
+      "args": ["tsx", "src/server.ts"],
+      "env": {
+        "GOOGLE_API_KEY": "AIzaSyBONL1fxoiIDl86qlNGuv28wjE4Sd-s3qg",
+        "GEMINI_MODEL": "gemini-1.5-pro-vision",
+        "TS_NODE_PROJECT": "tsconfig.mcp.json"
+      },
+      "autoApprove": ["analyse_screenshot", "watch_folder"]
+    }
+  }
+}

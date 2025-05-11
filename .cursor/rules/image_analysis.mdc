@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Whenever I ask to analyze the image or the visual output, use the image analysis mcp based tool to analyze the image named 'screenshots/current.png'.
