@@ -33,6 +33,7 @@ export class TileGridManager {
       vertexShader: placeholderTerrainVert,
       fragmentShader: placeholderTerrainFrag,
       uniforms: {
+        uWorldOffset: { value: new THREE.Vector3() },
         // uTime: { value: 0.0 }, // If you need time in shader
         uTerrainColorBase: { value: new THREE.Color(0x335522) }, // Dark green
         uTerrainColorPeak: { value: new THREE.Color(0x99aabb) }, // Light grey/blue for peaks
@@ -92,6 +93,12 @@ export class TileGridManager {
         );
       }
     }
+
+    // Update world offset uniform for seamless noise wrapping
+    this.sharedTerrainMaterial.uniforms.uWorldOffset.value.copy(
+      worldOriginOffset
+    );
+
     // if (this.sharedTerrainMaterial.uniforms.uTime) {
     //   this.sharedTerrainMaterial.uniforms.uTime.value += 0.016; // Example time update
     // }

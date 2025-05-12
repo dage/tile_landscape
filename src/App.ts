@@ -7,6 +7,7 @@ import {
   CAMERA_LOOK_AHEAD_DISTANCE,
   FLOATING_ORIGIN_SHIFT_THRESHOLD,
 } from '@/core/constants';
+import { computeShiftDelta } from '@/core/rendering/originShift';
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -19,6 +20,7 @@ export class App {
   private conceptualCameraPosition: THREE.Vector3;
   private worldOriginOffset: THREE.Vector3; // How much the world has shifted to keep camera near scene origin
   private sceneLookAtTarget: THREE.Vector3; // For camera.lookAt, in scene coordinates
+  private infoBox: HTMLDivElement;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -50,6 +52,23 @@ export class App {
     this.tileGridManager = new TileGridManager(this.scene);
 
     window.addEventListener('resize', this.onWindowResize.bind(this));
+
+    // Info box for debugging camera and world state
+    this.infoBox = document.createElement('div');
+    Object.assign(this.infoBox.style, {
+      position: 'absolute',
+      top: '10px',
+      right: '10px',
+      color: '#fff',
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      fontSize: '12px',
+      fontFamily: 'monospace',
+      padding: '5px',
+      zIndex: '100',
+      pointerEvents: 'none',
+      whiteSpace: 'pre',
+    });
+    document.body.appendChild(this.infoBox);
   }
 
   private setupCamera(): void {
@@ -121,30 +140,14 @@ export class App {
     this.conceptualCameraPosition.z += CAMERA_SPEED * deltaTime; // Moving along positive Z
 
     // 2. Floating Origin Check & Shift
-    // Calculate where camera *would* be in scene space without origin shift
-    const cameraScenePosProvisional = this.conceptualCameraPosition
-      .clone()
-      .sub(this.worldOriginOffset);
-
-    const shiftDelta = new THREE.Vector3();
-    if (
-      Math.abs(cameraScenePosProvisional.x) > FLOATING_ORIGIN_SHIFT_THRESHOLD
-    ) {
-      shiftDelta.x = Math.sign(cameraScenePosProvisional.x) * TILE_SIZE;
-    }
-    if (
-      Math.abs(cameraScenePosProvisional.z) > FLOATING_ORIGIN_SHIFT_THRESHOLD
-    ) {
-      shiftDelta.z = Math.sign(cameraScenePosProvisional.z) * TILE_SIZE;
-    }
-
+    const shiftDelta = computeShiftDelta(
+      this.conceptualCameraPosition,
+      this.worldOriginOffset,
+      FLOATING_ORIGIN_SHIFT_THRESHOLD,
+      TILE_SIZE
+    );
     if (shiftDelta.lengthSq() > 0) {
       this.worldOriginOffset.add(shiftDelta);
-      // All world objects' scene positions will be implicitly updated
-      // by subtracting the new, larger worldOriginOffset.
-      // Or, you could iterate over all top-level world objects and call .position.sub(shiftDelta)
-      // but recalculating from conceptual is cleaner:
-      // object.scenePosition = object.conceptualPosition - newWorldOriginOffset
     }
 
     // 3. Update camera's actual scene position
@@ -169,6 +172,23 @@ export class App {
     );
 
     // 6. Render
+    // Update debug info box
+    {
+      const cx = this.conceptualCameraPosition.x;
+      const cz = this.conceptualCameraPosition.z;
+      const ox = this.worldOriginOffset.x;
+      const oz = this.worldOriginOffset.z;
+      const camGridX = Math.round(cx / TILE_SIZE);
+      const camGridZ = Math.round(cz / TILE_SIZE);
+      const fracX = ((cx % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
+      const fracZ = ((cz % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
+      this.infoBox.innerText =
+        `Conceptual Cam Pos: x=${cx.toFixed(2)}, z=${cz.toFixed(2)}\n` +
+        `World Origin Offset: x=${ox.toFixed(2)}, z=${oz.toFixed(2)}\n` +
+        `Grid Coords: (${camGridX}, ${camGridZ})\n` +
+        `Frac In Tile: x=${fracX.toFixed(2)}, z=${fracZ.toFixed(2)}\n` +
+        `Shift Threshold: ${FLOATING_ORIGIN_SHIFT_THRESHOLD}`;
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -177,6 +197,8 @@ export class App {
     this.renderer.setAnimationLoop(null);
     this.tileGridManager.dispose();
     this.renderer.dispose();
+    // Remove debug info box
+    document.body.removeChild(this.infoBox);
     // Consider disposing scene geometries/materials if not handled by managers
   }
 }

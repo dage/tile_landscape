@@ -1,5 +1,7 @@
 // uniform float uTime; // Example if you want time-based animation in shader
 
+uniform vec3 uWorldOffset;
+
 out vec3 vWorldPosition;
 out float vHeight;
 
@@ -38,15 +40,13 @@ float snoise(vec2 v) {
 
 void main() {
     // Calculate world position before displacement
-    // modelMatrix correctly positions the tile in world space
-    // position is local to the PlaneGeometry (e.g., -TILE_SIZE/2 to +TILE_SIZE/2)
     vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+    vec3 unshiftedWorldPos = vWorldPosition + uWorldOffset;
     
     float noiseScale = 0.015; // Affects frequency of noise
     float heightScale = 15.0; // Affects amplitude of noise
     
-    // Use world XZ for noise input to make it seamless across tiles
-    float height = snoise(vWorldPosition.xz * noiseScale) * heightScale;
+    float height = snoise(unshiftedWorldPos.xz * noiseScale) * heightScale;
     vHeight = height;
 
     vec3 displacedPosition = position + vec3(0.0, height, 0.0);
