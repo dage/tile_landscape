@@ -24,7 +24,7 @@ export class App {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setClearColor(0xffffff); // White background for Hello World
+    this.renderer.setClearColor(0x101020); // Dark background
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
@@ -91,30 +91,30 @@ export class App {
 
   private animate(): void {
     // --- Start: Hello World modification ---
-    const canvas = this.renderer.domElement;
-    const context = canvas.getContext('2d');
-
-    if (context) {
-      // Clear canvas (Three.js renderer usually does this, but we are bypassing it)
-      context.fillStyle = 'white';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Style text
-      context.font = 'bold 72px Arial';
-      context.fillStyle = 'black';
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
-
-      // Draw text
-      context.fillText('Hello world', canvas.width / 2, canvas.height / 2);
-    } else {
-      // Fallback or error if 2D context isn't available (shouldn't happen with WebGLRenderer's canvas)
-      // For this test, we'll just let Three.js render an empty scene if context is null.
-      this.renderer.render(this.scene, this.camera);
-    }
+    // const canvas = this.renderer.domElement;
+    // const context = canvas.getContext('2d');
+    //
+    // if (context) {
+    //   // Clear canvas (Three.js renderer usually does this, but we are bypassing it)
+    //   context.fillStyle = 'white';
+    //   context.fillRect(0, 0, canvas.width, canvas.height);
+    //
+    //   // Style text
+    //   context.font = 'bold 72px Arial';
+    //   context.fillStyle = 'black';
+    //   context.textAlign = 'center';
+    //   context.textBaseline = 'middle';
+    //
+    //   // Draw text
+    //   context.fillText('Hello world', canvas.width / 2, canvas.height / 2);
+    // } else {
+    //   // Fallback or error if 2D context isn't available (shouldn't happen with WebGLRenderer's canvas)
+    //   // For this test, we'll just let Three.js render an empty scene if context is null.
+    //   this.renderer.render(this.scene, this.camera);
+    // }
     // --- End: Hello World modification ---
 
-    /* Original animation logic - temporarily commented out for Hello World test
+    // Original animation logic
     const deltaTime = this.clock.getDelta();
 
     // 1. Update conceptual camera position (auto-forward)
@@ -170,7 +170,6 @@ export class App {
 
     // 6. Render
     this.renderer.render(this.scene, this.camera);
-    */
   }
 
   public dispose(): void {

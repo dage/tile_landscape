@@ -1,12 +1,4 @@
-#version 300 es
-precision mediump float;
-
-uniform mat4 modelMatrix;
-uniform mat4 viewMatrix;
-uniform mat4 projectionMatrix;
 // uniform float uTime; // Example if you want time-based animation in shader
-
-in vec3 position;
 
 out vec3 vWorldPosition;
 out float vHeight;
