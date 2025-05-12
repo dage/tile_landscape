@@ -47,7 +47,18 @@ This document outlines the requirements for a browser-based demo showcasing an i
   - [x] E key: Accelerate camera forward
   - [x] R key: Decelerate camera
 
-### Phase 2: FFT Terrain Generation
+### Phase 2: Rendering
+
+- [ ] Add a fog that makes the tile wrapping invisible. It should have a long visibility range but make the fog strong just before the frustrum range in three.js.
+- [ ] Add different forms of lighting.
+- [ ] Add a panel at the top-left where the user can tweak the rendering visuals, like:
+  - Fog cutoffs
+  - Settings for each of the different lights
+  - Possible to enable/disable wireframe
+  - Choose advanced rendering experiment select-list (default "None" for standard behavior)
+- [ ] Add experiments for more advanced rendering techniques, like bump mapping and similar. These experiments can be selected in a drop-down list in the top-left panel. Organize the code so that these experiments are as independent modules as possible and don't add complexities to the main code base as far as is possible.
+
+### Phase 3: FFT Terrain Generation
 
 - Implement FFT-based heightmap generation (e.g., Diamond-Square or Perlin noise spectrum filtered in frequency domain).
   - CPU-side generation for now.
@@ -57,7 +68,7 @@ This document outlines the requirements for a browser-based demo showcasing an i
   - `getSurfaceVector`: Returns terrain normal and up-vector at world X,Y.
 - Update terrain tiles to use this heightmap data for displacement.
 
-### Phase 3: Physics & Instancing
+### Phase 4: Physics & Instancing
 
 - Integrate Rapier.js for physics.
   - Physics world runs in a Web Worker (`worker/physics.ts`).
@@ -65,7 +76,7 @@ This document outlines the requirements for a browser-based demo showcasing an i
 - Basic dynamic physics object (e.g., a sphere or capsule) representing the player/camera, affected by gravity.
 - Implement `InstancedMesh` for rendering many identical, simple objects (e.g., rocks, crystals) scattered on the terrain, with physics proxies.
 
-### Phase 4: LOSO & AI Agents (Stretch)
+### Phase 5: LOSO & AI Agents (Stretch)
 
 - **LOSO (Low-Observable Stealth Objects):**
   - Design and implement a simple GLTF model for a "stealth" object.
