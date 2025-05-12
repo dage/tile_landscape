@@ -1,13 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    "module": "Node16",
+    "moduleResolution": "node16",
     "strict": true,
+    "verbatimModuleSyntax": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "outDir": "dist",
+    "skipLibCheck": true,
+    "outDir": "./dist/mcp",
     "types": ["node"]
   },
-  "include": ["src/server.ts"]
+  "include": ["src/server.ts", "src/types"]
 }
