@@ -1,5 +1,8 @@
 import * as THREE from 'three';
+import { computeShiftDelta } from '@/core/rendering/originShift';
 import { TileGridManager } from '@/core/rendering/TileGridManager';
+import { CameraController } from '@/core/rendering/CameraController';
+import type { CameraControls } from '@/core/rendering/CameraController';
 import {
   TILE_SIZE,
   CAMERA_SPEED,
@@ -7,7 +10,6 @@ import {
   CAMERA_LOOK_AHEAD_DISTANCE,
   FLOATING_ORIGIN_SHIFT_THRESHOLD,
 } from '@/core/constants';
-import { computeShiftDelta } from '@/core/rendering/originShift';
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -16,11 +18,13 @@ export class App {
   private clock: THREE.Clock;
 
   private tileGridManager: TileGridManager;
+  private cameraController: CameraController;
 
   private conceptualCameraPosition: THREE.Vector3;
   private worldOriginOffset: THREE.Vector3; // How much the world has shifted to keep camera near scene origin
   private sceneLookAtTarget: THREE.Vector3; // For camera.lookAt, in scene coordinates
   private infoBox: HTMLDivElement;
+  private controls: CameraControls;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -45,11 +49,18 @@ export class App {
     ); // Start a bit into the grid
     this.worldOriginOffset = new THREE.Vector3(0, 0, 0);
     this.sceneLookAtTarget = new THREE.Vector3();
+    this.controls = {
+      speed: CAMERA_SPEED,
+      rotationX: 0,
+      rotationY: 0,
+      height: CAMERA_INITIAL_HEIGHT,
+    };
 
     this.setupCamera();
     this.setupLighting();
 
     this.tileGridManager = new TileGridManager(this.scene);
+    this.cameraController = new CameraController(this.camera, canvas);
 
     window.addEventListener('resize', this.onWindowResize.bind(this));
 
@@ -109,35 +120,19 @@ export class App {
   }
 
   private animate(): void {
-    // --- Start: Hello World modification ---
-    // const canvas = this.renderer.domElement;
-    // const context = canvas.getContext('2d');
-    //
-    // if (context) {
-    //   // Clear canvas (Three.js renderer usually does this, but we are bypassing it)
-    //   context.fillStyle = 'white';
-    //   context.fillRect(0, 0, canvas.width, canvas.height);
-    //
-    //   // Style text
-    //   context.font = 'bold 72px Arial';
-    //   context.fillStyle = 'black';
-    //   context.textAlign = 'center';
-    //   context.textBaseline = 'middle';
-    //
-    //   // Draw text
-    //   context.fillText('Hello world', canvas.width / 2, canvas.height / 2);
-    // } else {
-    //   // Fallback or error if 2D context isn't available (shouldn't happen with WebGLRenderer's canvas)
-    //   // For this test, we'll just let Three.js render an empty scene if context is null.
-    //   this.renderer.render(this.scene, this.camera);
-    // }
-    // --- End: Hello World modification ---
-
     // Original animation logic
     const deltaTime = this.clock.getDelta();
 
-    // 1. Update conceptual camera position (auto-forward)
-    this.conceptualCameraPosition.z += CAMERA_SPEED * deltaTime; // Moving along positive Z
+    // Update camera controls
+    this.controls = this.cameraController.update(deltaTime);
+
+    // 1. Update conceptual camera position based on controls
+    // Move in camera's local -Z (forward) direction
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyEuler(new THREE.Euler(0, this.controls.rotationY, 0, 'YXZ'));
+    direction.multiplyScalar(this.controls.speed * deltaTime);
+    this.conceptualCameraPosition.add(direction);
+    this.conceptualCameraPosition.y = this.controls.height;
 
     // 2. Floating Origin Check & Shift
     const shiftDelta = computeShiftDelta(
@@ -156,14 +151,13 @@ export class App {
       this.worldOriginOffset
     );
 
-    // 4. Update camera's lookAt target
-    const conceptualLookAt = new THREE.Vector3(
-      this.conceptualCameraPosition.x, // Follow camera's X
-      0, // Look towards the horizon (or a bit below camera height)
-      this.conceptualCameraPosition.z + CAMERA_LOOK_AHEAD_DISTANCE // Look ahead along Z
+    // 4. Update camera's rotation
+    this.camera.rotation.set(
+      this.controls.rotationX,
+      this.controls.rotationY,
+      0,
+      'YXZ'
     );
-    this.sceneLookAtTarget.subVectors(conceptualLookAt, this.worldOriginOffset);
-    this.camera.lookAt(this.sceneLookAtTarget);
 
     // 5. Update tile grid (recycles tiles, updates their scene positions)
     this.tileGridManager.update(
@@ -171,7 +165,6 @@ export class App {
       this.worldOriginOffset
     );
 
-    // 6. Render
     // Update debug info box
     {
       const cx = this.conceptualCameraPosition.x;
@@ -183,6 +176,10 @@ export class App {
       const fracX = ((cx % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
       const fracZ = ((cz % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
       this.infoBox.innerText =
+        `Controls: Speed=${this.controls.speed.toFixed(1)}, Height=${this.controls.height.toFixed(1)}\n` +
+        `Rotation: X=${((this.controls.rotationX * 180) / Math.PI).toFixed(0)}°, Y=${((this.controls.rotationY * 180) / Math.PI).toFixed(0)}°\n` +
+        `Direction: (${direction.x.toFixed(2)}, ${direction.y.toFixed(2)}, ${direction.z.toFixed(2)})\n` +
+        `Movement: Δx=${direction.x.toFixed(2)}, Δy=${direction.y.toFixed(2)}, Δz=${direction.z.toFixed(2)}\n` +
         `Conceptual Cam Pos: x=${cx.toFixed(2)}, z=${cz.toFixed(2)}\n` +
         `World Origin Offset: x=${ox.toFixed(2)}, z=${oz.toFixed(2)}\n` +
         `Grid Coords: (${camGridX}, ${camGridZ})\n` +
@@ -196,6 +193,7 @@ export class App {
     window.removeEventListener('resize', this.onWindowResize);
     this.renderer.setAnimationLoop(null);
     this.tileGridManager.dispose();
+    this.cameraController.dispose();
     this.renderer.dispose();
     // Remove debug info box
     document.body.removeChild(this.infoBox);

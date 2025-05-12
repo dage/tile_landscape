@@ -32,13 +32,20 @@ This document outlines the requirements for a browser-based demo showcasing an i
 
 ### Phase 1: Visual Fly-over
 
-- Basic Three.js scene setup (`main.ts`).
-- Camera (Perspective, initial position, basic controls - e.g., auto-forward).
-- Basic lighting (Ambient, Directional).
-- Create a repeating tile grid system.
-  - Each tile is a `THREE.Mesh` with `PlaneGeometry`.
-  - Implement logic to shift tiles as camera moves (floating origin concept for tile positions).
-- Placeholder terrain: Apply a simple procedural texture or vertex displacement to tiles (e.g., using a simplex noise function in the shader or directly on vertices).
+- [x] Basic Three.js scene setup (`main.ts`).
+- [x] Camera (Perspective, initial position, basic controls - e.g., auto-forward).
+- [x] Basic lighting (Ambient, Directional).
+- [x] Create a repeating tile grid system.
+  - [x] Each tile is a `THREE.Mesh` with `PlaneGeometry`.
+  - [x] Implement logic to shift tiles as camera moves (floating origin concept for tile positions).
+- [x] Placeholder terrain: Apply a simple procedural texture or vertex displacement to tiles (e.g., using a simplex noise function in the shader or directly on vertices).
+- [x] Interactive camera controls:
+  - [x] Mouse drag: Rotate camera (only when left mouse button held)
+  - [x] WASD keys: Rotate camera
+  - [x] Q key: Increase camera height
+  - [x] Z key: Decrease camera height
+  - [x] E key: Accelerate camera forward
+  - [x] R key: Decelerate camera
 
 ### Phase 2: FFT Terrain Generation
 
