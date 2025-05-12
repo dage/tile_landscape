@@ -10,6 +10,10 @@ import {
   CAMERA_LOOK_AHEAD_DISTANCE,
   FLOATING_ORIGIN_SHIFT_THRESHOLD,
 } from '@/core/constants';
+import { NoopExperiment } from './core/rendering/experiments/RenderingExperiment';
+import type { RenderingExperiment } from './core/rendering/experiments/RenderingExperiment';
+import { BumpMappingExperiment } from './core/rendering/experiments/BumpMappingExperiment';
+import { CustomShaderExperiment } from './core/rendering/experiments/CustomShaderExperiment';
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -25,6 +29,17 @@ export class App {
   private sceneLookAtTarget: THREE.Vector3; // For camera.lookAt, in scene coordinates
   private infoBox: HTMLDivElement;
   private controls: CameraControls;
+  private renderingPanel: HTMLDivElement;
+  private lights: {
+    ambient: THREE.AmbientLight;
+    directional: THREE.DirectionalLight;
+    hemispheric?: THREE.HemisphereLight;
+    point?: THREE.PointLight;
+  } = {
+    ambient: null as unknown as THREE.AmbientLight,
+    directional: null as unknown as THREE.DirectionalLight,
+  };
+  private currentExperiment: RenderingExperiment = new NoopExperiment();
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -33,6 +48,9 @@ export class App {
     this.renderer.setClearColor(0x101020); // Dark background
 
     this.scene = new THREE.Scene();
+    // Add neutral fog (same as background)
+    this.scene.fog = new THREE.Fog(0x101020, 100, 800);
+
     this.camera = new THREE.PerspectiveCamera(
       75,
       window.innerWidth / window.innerHeight,
@@ -80,6 +98,420 @@ export class App {
       whiteSpace: 'pre',
     });
     document.body.appendChild(this.infoBox);
+
+    // Rendering debug panel
+    this.renderingPanel = document.createElement('div');
+    Object.assign(this.renderingPanel.style, {
+      position: 'absolute',
+      top: '10px',
+      left: '10px',
+      color: '#fff',
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      fontSize: '12px',
+      fontFamily: 'monospace',
+      padding: '10px',
+      zIndex: '100',
+      borderRadius: '5px',
+    });
+    document.body.appendChild(this.renderingPanel);
+
+    this.createFogControls();
+    this.createRenderingExperimentControls();
+    this.createWireframeToggle();
+  }
+
+  private createFogControls(): void {
+    const fogSection = document.createElement('div');
+    fogSection.style.marginBottom = '15px';
+
+    const fogTitle = document.createElement('h3');
+    fogTitle.innerText = 'Fog Settings';
+    fogTitle.style.margin = '0 0 10px 0';
+    fogTitle.style.fontSize = '14px';
+    fogSection.appendChild(fogTitle);
+
+    // Helper function to create sliders
+    const createSlider = (
+      label: string,
+      min: number,
+      max: number,
+      value: number,
+      step: number,
+      onChange: (value: number) => void
+    ) => {
+      const group = document.createElement('div');
+      group.style.marginBottom = '8px';
+
+      const labelElem = document.createElement('label');
+      labelElem.innerText = label;
+      labelElem.style.display = 'block';
+      labelElem.style.marginBottom = '2px';
+
+      const valueDisplay = document.createElement('span');
+      valueDisplay.innerText = value.toFixed(0);
+      valueDisplay.style.marginLeft = '10px';
+      valueDisplay.style.minWidth = '30px';
+      valueDisplay.style.display = 'inline-block';
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = min.toString();
+      slider.max = max.toString();
+      slider.step = step.toString();
+      slider.value = value.toString();
+      slider.style.width = '120px';
+      slider.style.verticalAlign = 'middle';
+
+      slider.addEventListener('input', (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        valueDisplay.innerText = newValue.toFixed(0);
+        onChange(newValue);
+      });
+
+      group.appendChild(labelElem);
+      group.appendChild(slider);
+      group.appendChild(valueDisplay);
+
+      return group;
+    };
+
+    // Get initial fog values
+    const fog = this.scene.fog as THREE.Fog;
+    const fogNear = fog.near;
+    const fogFar = fog.far;
+
+    // Create fog near slider
+    const nearSlider = createSlider(
+      'Fog Near Distance:',
+      0,
+      1000,
+      fogNear,
+      10,
+      (value) => {
+        if (value < fog.far) {
+          fog.near = value;
+        }
+      }
+    );
+    fogSection.appendChild(nearSlider);
+
+    // Create fog far slider
+    const farSlider = createSlider(
+      'Fog Far Distance:',
+      0,
+      2000,
+      fogFar,
+      10,
+      (value) => {
+        if (value > fog.near) {
+          fog.far = value;
+        }
+      }
+    );
+    fogSection.appendChild(farSlider);
+
+    // Add toggle checkbox for fog
+    const fogToggle = document.createElement('div');
+    fogToggle.style.marginTop = '10px';
+
+    const toggleCheckbox = document.createElement('input');
+    toggleCheckbox.type = 'checkbox';
+    toggleCheckbox.checked = true;
+    toggleCheckbox.id = 'fogToggle';
+
+    const toggleLabel = document.createElement('label');
+    toggleLabel.innerText = 'Enable Fog';
+    toggleLabel.htmlFor = 'fogToggle';
+    toggleLabel.style.marginLeft = '5px';
+
+    toggleCheckbox.addEventListener('change', (event) => {
+      const enabled = (event.target as HTMLInputElement).checked;
+      if (enabled) {
+        this.scene.fog = fog;
+      } else {
+        this.scene.fog = null;
+      }
+    });
+
+    fogToggle.appendChild(toggleCheckbox);
+    fogToggle.appendChild(toggleLabel);
+    fogSection.appendChild(fogToggle);
+
+    this.renderingPanel.appendChild(fogSection);
+
+    // Create lighting controls
+    this.createLightingControls();
+  }
+
+  private createLightingControls(): void {
+    const lightingSection = document.createElement('div');
+    lightingSection.style.marginBottom = '15px';
+
+    const lightingTitle = document.createElement('h3');
+    lightingTitle.innerText = 'Lighting Settings';
+    lightingTitle.style.margin = '0 0 10px 0';
+    lightingTitle.style.fontSize = '14px';
+    lightingSection.appendChild(lightingTitle);
+
+    // Helper function to create sliders
+    const createSlider = (
+      label: string,
+      min: number,
+      max: number,
+      value: number,
+      step: number,
+      onChange: (value: number) => void
+    ) => {
+      const group = document.createElement('div');
+      group.style.marginBottom = '8px';
+
+      const labelElem = document.createElement('label');
+      labelElem.innerText = label;
+      labelElem.style.display = 'block';
+      labelElem.style.marginBottom = '2px';
+
+      const valueDisplay = document.createElement('span');
+      valueDisplay.innerText = value.toFixed(2);
+      valueDisplay.style.marginLeft = '10px';
+      valueDisplay.style.minWidth = '35px';
+      valueDisplay.style.display = 'inline-block';
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = min.toString();
+      slider.max = max.toString();
+      slider.step = step.toString();
+      slider.value = value.toString();
+      slider.style.width = '120px';
+      slider.style.verticalAlign = 'middle';
+
+      slider.addEventListener('input', (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        valueDisplay.innerText = newValue.toFixed(2);
+        onChange(newValue);
+      });
+
+      group.appendChild(labelElem);
+      group.appendChild(slider);
+      group.appendChild(valueDisplay);
+
+      return group;
+    };
+
+    // Ambient light intensity slider
+    const ambientSlider = createSlider(
+      'Ambient Light:',
+      0,
+      1,
+      this.lights.ambient.intensity,
+      0.01,
+      (value) => {
+        this.lights.ambient.intensity = value;
+      }
+    );
+    lightingSection.appendChild(ambientSlider);
+
+    // Directional light intensity slider
+    const directionalSlider = createSlider(
+      'Directional Light:',
+      0,
+      1,
+      this.lights.directional.intensity,
+      0.01,
+      (value) => {
+        this.lights.directional.intensity = value;
+      }
+    );
+    lightingSection.appendChild(directionalSlider);
+
+    // Add toggle for Hemisphere light
+    const hemToggle = document.createElement('div');
+    hemToggle.style.marginTop = '10px';
+
+    const hemCheckbox = document.createElement('input');
+    hemCheckbox.type = 'checkbox';
+    hemCheckbox.id = 'hemToggle';
+
+    const hemLabel = document.createElement('label');
+    hemLabel.innerText = 'Hemisphere Light';
+    hemLabel.htmlFor = 'hemToggle';
+    hemLabel.style.marginLeft = '5px';
+
+    hemCheckbox.addEventListener('change', (event) => {
+      const enabled = (event.target as HTMLInputElement).checked;
+      if (enabled && !this.lights.hemispheric) {
+        this.lights.hemispheric = new THREE.HemisphereLight(
+          0x6688ff,
+          0x33aa33,
+          0.5
+        );
+        this.scene.add(this.lights.hemispheric);
+      } else if (!enabled && this.lights.hemispheric) {
+        this.scene.remove(this.lights.hemispheric);
+        this.lights.hemispheric = undefined;
+      }
+    });
+
+    hemToggle.appendChild(hemCheckbox);
+    hemToggle.appendChild(hemLabel);
+    lightingSection.appendChild(hemToggle);
+
+    // Add toggle for Point light
+    const pointToggle = document.createElement('div');
+    pointToggle.style.marginTop = '10px';
+
+    const pointCheckbox = document.createElement('input');
+    pointCheckbox.type = 'checkbox';
+    pointCheckbox.id = 'pointToggle';
+
+    const pointLabel = document.createElement('label');
+    pointLabel.innerText = 'Point Light';
+    pointLabel.htmlFor = 'pointToggle';
+    pointLabel.style.marginLeft = '5px';
+
+    pointCheckbox.addEventListener('change', (event) => {
+      const enabled = (event.target as HTMLInputElement).checked;
+      if (enabled && !this.lights.point) {
+        this.lights.point = new THREE.PointLight(0xffaa55, 0.8, 500);
+        this.lights.point.position.copy(this.camera.position);
+        this.lights.point.position.y += 50;
+        this.lights.point.position.z -= 50;
+        this.scene.add(this.lights.point);
+      } else if (!enabled && this.lights.point) {
+        this.scene.remove(this.lights.point);
+        this.lights.point = undefined;
+      }
+    });
+
+    pointToggle.appendChild(pointCheckbox);
+    pointToggle.appendChild(pointLabel);
+    lightingSection.appendChild(pointToggle);
+
+    this.renderingPanel.appendChild(lightingSection);
+  }
+
+  private createRenderingExperimentControls(): void {
+    const experimentSection = document.createElement('div');
+    experimentSection.style.marginBottom = '15px';
+
+    const experimentTitle = document.createElement('h3');
+    experimentTitle.innerText = 'Rendering Experiments';
+    experimentTitle.style.margin = '0 0 10px 0';
+    experimentTitle.style.fontSize = '14px';
+    experimentSection.appendChild(experimentTitle);
+
+    // Dropdown for experiment selection
+    const selectGroup = document.createElement('div');
+    const selectLabel = document.createElement('label');
+    selectLabel.innerText = 'Select Experiment:';
+    selectLabel.style.display = 'block';
+    selectLabel.style.marginBottom = '5px';
+
+    const experimentSelect = document.createElement('select');
+    experimentSelect.style.width = '100%';
+    experimentSelect.style.padding = '3px';
+    experimentSelect.style.backgroundColor = '#333';
+    experimentSelect.style.color = '#fff';
+    experimentSelect.style.border = '1px solid #555';
+
+    // Add experiment options
+    const experiments = [
+      { name: 'None', value: 'none' },
+      { name: 'Bump Mapping', value: 'bumpMapping' },
+      { name: 'Custom Shader', value: 'customShader' },
+      // Add more experiments as they're implemented
+    ];
+
+    experiments.forEach((exp) => {
+      const option = document.createElement('option');
+      option.value = exp.value;
+      option.innerText = exp.name;
+      experimentSelect.appendChild(option);
+    });
+
+    // Handle experiment change
+    experimentSelect.addEventListener('change', (event) => {
+      const value = (event.target as HTMLSelectElement).value;
+
+      // Dispose of the current experiment if it exists
+      if (this.currentExperiment) {
+        this.currentExperiment.dispose();
+      }
+
+      // Create the new experiment based on selection
+      switch (value) {
+        case 'bumpMapping':
+          this.currentExperiment = new BumpMappingExperiment(
+            this.scene,
+            this.tileGridManager
+          );
+          break;
+        case 'customShader':
+          this.currentExperiment = new CustomShaderExperiment(
+            this.scene,
+            this.tileGridManager
+          );
+          break;
+        case 'none':
+        default:
+          this.currentExperiment = new NoopExperiment();
+          break;
+      }
+
+      // Initialize the new experiment
+      const initResult = this.currentExperiment.initialize();
+      // Handle async initialization if returned a Promise
+      if (initResult instanceof Promise) {
+        initResult.catch((error) => {
+          console.error('Failed to initialize rendering experiment:', error);
+        });
+      }
+    });
+
+    selectGroup.appendChild(selectLabel);
+    selectGroup.appendChild(experimentSelect);
+    experimentSection.appendChild(selectGroup);
+
+    // Add experiment-specific parameters div that can be populated by the active experiment
+    const experimentParams = document.createElement('div');
+    experimentParams.id = 'experimentParams';
+    experimentParams.style.marginTop = '10px';
+    experimentSection.appendChild(experimentParams);
+
+    this.renderingPanel.appendChild(experimentSection);
+  }
+
+  private createWireframeToggle(): void {
+    const wireframeSection = document.createElement('div');
+    wireframeSection.style.marginBottom = '15px';
+
+    const wireframeTitle = document.createElement('h3');
+    wireframeTitle.innerText = 'Wireframe Mode';
+    wireframeTitle.style.margin = '0 0 10px 0';
+    wireframeTitle.style.fontSize = '14px';
+    wireframeSection.appendChild(wireframeTitle);
+
+    const wireframeToggle = document.createElement('div');
+
+    const toggleCheckbox = document.createElement('input');
+    toggleCheckbox.type = 'checkbox';
+    toggleCheckbox.id = 'wireframeToggle';
+
+    const toggleLabel = document.createElement('label');
+    toggleLabel.innerText = 'Enable Wireframe';
+    toggleLabel.htmlFor = 'wireframeToggle';
+    toggleLabel.style.marginLeft = '5px';
+
+    toggleCheckbox.addEventListener('change', (event) => {
+      const enabled = (event.target as HTMLInputElement).checked;
+      this.tileGridManager.setWireframeMode(enabled);
+    });
+
+    wireframeToggle.appendChild(toggleCheckbox);
+    wireframeToggle.appendChild(toggleLabel);
+    wireframeSection.appendChild(wireframeToggle);
+
+    this.renderingPanel.appendChild(wireframeSection);
   }
 
   private setupCamera(): void {
@@ -100,13 +532,14 @@ export class App {
   }
 
   private setupLighting(): void {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    this.scene.add(ambientLight);
+    // Simple white ambient and directional light
+    this.lights.ambient = new THREE.AmbientLight(0xffffff, 0.4);
+    this.scene.add(this.lights.ambient);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(50, 100, 20); // Adjust as needed
-    directionalLight.castShadow = false; // Shadows can be added later
-    this.scene.add(directionalLight);
+    this.lights.directional = new THREE.DirectionalLight(0xffffff, 0.6);
+    this.lights.directional.position.set(50, 100, 20);
+    this.lights.directional.castShadow = false;
+    this.scene.add(this.lights.directional);
   }
 
   private onWindowResize(): void {
@@ -162,8 +595,45 @@ export class App {
     // 5. Update tile grid (recycles tiles, updates their scene positions)
     this.tileGridManager.update(
       this.conceptualCameraPosition,
-      this.worldOriginOffset
+      this.worldOriginOffset,
+      this.camera.position
     );
+
+    // Update point light position if it exists
+    if (this.lights.point) {
+      this.lights.point.position.copy(this.camera.position);
+      this.lights.point.position.y += 50;
+      this.lights.point.position.z -= 50;
+    }
+
+    // Update the current rendering experiment if active
+    if (this.currentExperiment) {
+      this.currentExperiment.update(deltaTime);
+
+      // If we're using the custom shader experiment, update the camera position
+      if (this.currentExperiment instanceof CustomShaderExperiment) {
+        // Access the shader material directly through the experiment
+        const experiment = this.currentExperiment as CustomShaderExperiment;
+        if (
+          experiment.customShaderMaterial &&
+          experiment.customShaderMaterial.uniforms.cameraPosition
+        ) {
+          experiment.customShaderMaterial.uniforms.cameraPosition.value.copy(
+            this.camera.position
+          );
+        }
+
+        // Also update the world offset uniform
+        if (
+          experiment.customShaderMaterial &&
+          experiment.customShaderMaterial.uniforms.uWorldOffset
+        ) {
+          experiment.customShaderMaterial.uniforms.uWorldOffset.value.copy(
+            this.worldOriginOffset
+          );
+        }
+      }
+    }
 
     // Update debug info box
     {
@@ -197,6 +667,14 @@ export class App {
     this.renderer.dispose();
     // Remove debug info box
     document.body.removeChild(this.infoBox);
+    // Remove rendering panel
+    if (this.renderingPanel && this.renderingPanel.parentElement) {
+      this.renderingPanel.parentElement.removeChild(this.renderingPanel);
+    }
+    // Dispose of current experiment if any
+    if (this.currentExperiment) {
+      this.currentExperiment.dispose();
+    }
     // Consider disposing scene geometries/materials if not handled by managers
   }
 }

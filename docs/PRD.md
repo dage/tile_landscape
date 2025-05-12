@@ -49,14 +49,14 @@ This document outlines the requirements for a browser-based demo showcasing an i
 
 ### Phase 2: Rendering
 
-- [ ] Add a fog that makes the tile wrapping invisible. It should have a long visibility range but make the fog strong just before the frustrum range in three.js.
-- [ ] Add different forms of lighting.
-- [ ] Add a panel at the top-left where the user can tweak the rendering visuals, like:
-  - Fog cutoffs
-  - Settings for each of the different lights
-  - Possible to enable/disable wireframe
-  - Choose advanced rendering experiment select-list (default "None" for standard behavior)
-- [ ] Add experiments for more advanced rendering techniques, like bump mapping and similar. These experiments can be selected in a drop-down list in the top-left panel. Organize the code so that these experiments are as independent modules as possible and don't add complexities to the main code base as far as is possible.
+- [x] Add a fog that makes the tile wrapping invisible. It should have a long visibility range but make the fog strong just before the frustrum range in three.js.
+- [x] Add different forms of lighting.
+- [x] Add a panel at the top-left where the user can tweak the rendering visuals, like:
+  - [x] Fog cutoffs
+  - [x] Settings for each of the different lights
+  - [x] Possible to enable/disable wireframe
+  - [x] Choose advanced rendering experiment select-list (default "None" for standard behavior)
+- [x] Add experiments for more advanced rendering techniques, like bump mapping and similar. These experiments can be selected in a drop-down list in the top-left panel. Organize the code so that these experiments are as independent modules as possible and don't add complexities to the main code base as far as is possible.
 
 ### Phase 3: FFT Terrain Generation
 
