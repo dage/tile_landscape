@@ -5,12 +5,15 @@ interface TerrainTile {
   mesh: THREE.Mesh;
   conceptualGridX: number;
   conceptualGridZ: number;
+  boundaryMesh?: THREE.Object3D; // Changed from LineSegments to Object3D to be more generic
 }
 
 export class TileGridManager {
   private scene: THREE.Scene;
   private tiles: TerrainTile[][] = [];
   private sharedTerrainMaterial: THREE.Material;
+  private boundariesVisible: boolean = false; // Track visibility state
+  private boundaryMaterial: THREE.LineBasicMaterial;
 
   private lastCameraGridX: number = -Infinity;
   private lastCameraGridZ: number = -Infinity;
@@ -26,6 +29,14 @@ export class TileGridManager {
       flatShading: false,
       side: THREE.FrontSide,
       vertexColors: true,
+    });
+
+    // Create a material for boundaries
+    this.boundaryMaterial = new THREE.LineBasicMaterial({
+      color: 0x00ffff, // Cyan color for visibility
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: true,
     });
 
     this.initGrid();
@@ -85,21 +96,49 @@ export class TileGridManager {
     // Height-based coloring using vertex colors
     const colors = new Float32Array(positions.count * 3);
     const color = new THREE.Color();
-    const baseColor = new THREE.Color(0x335522); // Dark green
-    const peakColor = new THREE.Color(0x99aabb); // Light blue-gray
+
+    // Enhanced color palette for more variation
+    const colorStops = [
+      { height: -10.0, color: new THREE.Color(0x224411) }, // Deep valleys - dark forest
+      { height: -2.0, color: new THREE.Color(0x336622) }, // Low areas - forest green
+      { height: 5.0, color: new THREE.Color(0x669944) }, // Mid-level - grassy
+      { height: 10.0, color: new THREE.Color(0x998866) }, // High ground - rocky
+      { height: 15.0, color: new THREE.Color(0xaabbcc) }, // Peaks - snowy blue-gray
+    ];
 
     for (let i = 0; i < positions.count; i++) {
       vertex.fromBufferAttribute(positions, i);
 
-      // Normalize height for color interpolation
-      const normalizedHeight = THREE.MathUtils.smoothstep(
-        -10.0,
-        15.0,
-        vertex.y
-      );
+      // Find the appropriate color segment based on height
+      let colorIndex = 0;
+      for (let j = 0; j < colorStops.length - 1; j++) {
+        if (
+          vertex.y >= colorStops[j].height &&
+          vertex.y < colorStops[j + 1].height
+        ) {
+          colorIndex = j;
+          break;
+        } else if (vertex.y >= colorStops[colorStops.length - 1].height) {
+          colorIndex = colorStops.length - 2; // Last segment
+        }
+      }
 
-      // Mix colors based on height
-      color.copy(baseColor).lerp(peakColor, normalizedHeight);
+      // Calculate interpolation within this segment
+      const lowerStop = colorStops[colorIndex];
+      const upperStop = colorStops[colorIndex + 1];
+      const segmentSize = upperStop.height - lowerStop.height;
+      let t = (vertex.y - lowerStop.height) / segmentSize;
+
+      // Add a subtle noise factor to the color interpolation for more variation
+      const noiseValue =
+        this.simplifiedNoise(
+          (gridX + vertex.x) * 0.05,
+          (gridZ + vertex.z) * 0.05
+        ) * 0.15;
+      t = THREE.MathUtils.clamp(t + noiseValue, 0, 1);
+
+      // Interpolate between the two colors in this segment
+      color.copy(lowerStop.color).lerp(upperStop.color, t);
 
       // Set RGB values
       colors[i * 3] = color.r;
@@ -177,6 +216,24 @@ export class TileGridManager {
           0 - worldOriginOffset.y, // Assuming terrain base is at y=0 conceptually
           conceptualTileWorldZ - worldOriginOffset.z
         );
+
+        // Also update the boundary position if it exists
+        if (tile.boundaryMesh) {
+          const tileScenePosition = new THREE.Vector3(
+            conceptualTileWorldX - worldOriginOffset.x,
+            0.05 - worldOriginOffset.y, // Slightly above ground to avoid z-fighting
+            conceptualTileWorldZ - worldOriginOffset.z
+          );
+
+          tile.boundaryMesh.position.copy(tileScenePosition);
+
+          // Also update corner markers
+          if ((tile.boundaryMesh as any).cornerMarkers) {
+            (tile.boundaryMesh as any).cornerMarkers.position.copy(
+              tileScenePosition
+            );
+          }
+        }
       }
     }
   }
@@ -212,6 +269,96 @@ export class TileGridManager {
             targetConceptualGridX,
             targetConceptualGridZ
           );
+
+          // Clean up old boundary mesh if it exists
+          if (tile.boundaryMesh) {
+            this.scene.remove(tile.boundaryMesh);
+
+            // Also remove corner markers
+            if ((tile.boundaryMesh as any).cornerMarkers) {
+              this.scene.remove((tile.boundaryMesh as any).cornerMarkers);
+            }
+
+            if ((tile.boundaryMesh as THREE.Line).geometry) {
+              (tile.boundaryMesh as THREE.Line).geometry.dispose();
+            }
+          }
+
+          // Create new boundary for this tile
+          this.createTileBoundary(tile);
+        }
+      }
+    }
+  }
+
+  /**
+   * Creates a wireframe boundary for a tile
+   */
+  private createTileBoundary(tile: TerrainTile): void {
+    // Create a simple square outline at the exact tile perimeter
+    const halfSize = TILE_SIZE / 2;
+
+    // Create exactly 4 points for the corners of the tile
+    const points = [
+      new THREE.Vector3(-halfSize, 0, -halfSize), // Bottom left
+      new THREE.Vector3(halfSize, 0, -halfSize), // Bottom right
+      new THREE.Vector3(halfSize, 0, halfSize), // Top right
+      new THREE.Vector3(-halfSize, 0, halfSize), // Top left
+      new THREE.Vector3(-halfSize, 0, -halfSize), // Close the loop
+    ];
+
+    // Create geometry from the points
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+    // Use LineLoop for a continuous line
+    const boundaryMesh = new THREE.LineLoop(geometry, this.boundaryMaterial);
+    boundaryMesh.visible = this.boundariesVisible;
+
+    // Add small vertical markers at the corners for better visibility
+    const cornerMarkers = new THREE.Group();
+    const markerHeight = 5;
+
+    // Add a small vertical line at each corner
+    for (let i = 0; i < 4; i++) {
+      const cornerPoint = points[i].clone();
+      const markerPoints = [
+        cornerPoint,
+        cornerPoint.clone().setY(markerHeight),
+      ];
+
+      const markerGeometry = new THREE.BufferGeometry().setFromPoints(
+        markerPoints
+      );
+      const marker = new THREE.Line(markerGeometry, this.boundaryMaterial);
+      cornerMarkers.add(marker);
+    }
+
+    // Add the corner markers to the scene
+    cornerMarkers.visible = this.boundariesVisible;
+    this.scene.add(cornerMarkers);
+
+    // Store the corner markers with the boundary mesh for disposal later
+    (boundaryMesh as any).cornerMarkers = cornerMarkers;
+
+    // Store reference to the boundary mesh
+    tile.boundaryMesh = boundaryMesh;
+
+    // Add boundary mesh to scene
+    this.scene.add(boundaryMesh);
+  }
+
+  /**
+   * Set visibility of tile boundaries for debugging
+   */
+  public setTileBoundariesVisible(visible: boolean): void {
+    this.boundariesVisible = visible;
+
+    // Update visibility of all boundary meshes
+    for (let r = 0; r < GRID_DIMENSION; r++) {
+      for (let c = 0; c < GRID_DIMENSION; c++) {
+        const tile = this.tiles[r][c];
+        if (tile.boundaryMesh) {
+          tile.boundaryMesh.visible = visible;
         }
       }
     }
@@ -251,11 +398,29 @@ export class TileGridManager {
         if (tile.mesh.geometry) {
           tile.mesh.geometry.dispose();
         }
+
+        // Clean up boundary mesh
+        if (tile.boundaryMesh) {
+          this.scene.remove(tile.boundaryMesh);
+
+          // Also remove corner markers
+          if ((tile.boundaryMesh as any).cornerMarkers) {
+            this.scene.remove((tile.boundaryMesh as any).cornerMarkers);
+          }
+
+          if ((tile.boundaryMesh as THREE.Line).geometry) {
+            (tile.boundaryMesh as THREE.Line).geometry.dispose();
+          }
+        }
       })
     );
 
     if (this.sharedTerrainMaterial instanceof THREE.Material) {
       this.sharedTerrainMaterial.dispose();
+    }
+
+    if (this.boundaryMaterial) {
+      this.boundaryMaterial.dispose();
     }
   }
 }

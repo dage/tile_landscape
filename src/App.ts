@@ -49,7 +49,7 @@ export class App {
 
     this.scene = new THREE.Scene();
     // Add neutral fog (same as background)
-    this.scene.fog = new THREE.Fog(0x101020, 100, 800);
+    this.scene.fog = new THREE.Fog(0x101020, 200, 400);
 
     this.camera = new THREE.PerspectiveCamera(
       75,
@@ -118,6 +118,7 @@ export class App {
     this.createFogControls();
     this.createRenderingExperimentControls();
     this.createWireframeToggle();
+    this.createTileBoundariesToggle();
   }
 
   private createFogControls(): void {
@@ -324,69 +325,6 @@ export class App {
     );
     lightingSection.appendChild(directionalSlider);
 
-    // Add toggle for Hemisphere light
-    const hemToggle = document.createElement('div');
-    hemToggle.style.marginTop = '10px';
-
-    const hemCheckbox = document.createElement('input');
-    hemCheckbox.type = 'checkbox';
-    hemCheckbox.id = 'hemToggle';
-
-    const hemLabel = document.createElement('label');
-    hemLabel.innerText = 'Hemisphere Light';
-    hemLabel.htmlFor = 'hemToggle';
-    hemLabel.style.marginLeft = '5px';
-
-    hemCheckbox.addEventListener('change', (event) => {
-      const enabled = (event.target as HTMLInputElement).checked;
-      if (enabled && !this.lights.hemispheric) {
-        this.lights.hemispheric = new THREE.HemisphereLight(
-          0x6688ff,
-          0x33aa33,
-          0.5
-        );
-        this.scene.add(this.lights.hemispheric);
-      } else if (!enabled && this.lights.hemispheric) {
-        this.scene.remove(this.lights.hemispheric);
-        this.lights.hemispheric = undefined;
-      }
-    });
-
-    hemToggle.appendChild(hemCheckbox);
-    hemToggle.appendChild(hemLabel);
-    lightingSection.appendChild(hemToggle);
-
-    // Add toggle for Point light
-    const pointToggle = document.createElement('div');
-    pointToggle.style.marginTop = '10px';
-
-    const pointCheckbox = document.createElement('input');
-    pointCheckbox.type = 'checkbox';
-    pointCheckbox.id = 'pointToggle';
-
-    const pointLabel = document.createElement('label');
-    pointLabel.innerText = 'Point Light';
-    pointLabel.htmlFor = 'pointToggle';
-    pointLabel.style.marginLeft = '5px';
-
-    pointCheckbox.addEventListener('change', (event) => {
-      const enabled = (event.target as HTMLInputElement).checked;
-      if (enabled && !this.lights.point) {
-        this.lights.point = new THREE.PointLight(0xffaa55, 0.8, 500);
-        this.lights.point.position.copy(this.camera.position);
-        this.lights.point.position.y += 50;
-        this.lights.point.position.z -= 50;
-        this.scene.add(this.lights.point);
-      } else if (!enabled && this.lights.point) {
-        this.scene.remove(this.lights.point);
-        this.lights.point = undefined;
-      }
-    });
-
-    pointToggle.appendChild(pointCheckbox);
-    pointToggle.appendChild(pointLabel);
-    lightingSection.appendChild(pointToggle);
-
     this.renderingPanel.appendChild(lightingSection);
   }
 
@@ -514,6 +452,40 @@ export class App {
     this.renderingPanel.appendChild(wireframeSection);
   }
 
+  private createTileBoundariesToggle(): void {
+    const debugSection = document.createElement('div');
+    debugSection.style.marginBottom = '15px';
+
+    const debugTitle = document.createElement('h3');
+    debugTitle.innerText = 'Debug Settings';
+    debugTitle.style.margin = '0 0 10px 0';
+    debugTitle.style.fontSize = '14px';
+    debugSection.appendChild(debugTitle);
+
+    // Create the toggle for tile boundaries
+    const boundariesToggle = document.createElement('div');
+
+    const toggleCheckbox = document.createElement('input');
+    toggleCheckbox.type = 'checkbox';
+    toggleCheckbox.id = 'tileBoundariesToggle';
+
+    const toggleLabel = document.createElement('label');
+    toggleLabel.innerText = 'Show Tile Boundaries';
+    toggleLabel.htmlFor = 'tileBoundariesToggle';
+    toggleLabel.style.marginLeft = '5px';
+
+    toggleCheckbox.addEventListener('change', (event) => {
+      const enabled = (event.target as HTMLInputElement).checked;
+      this.tileGridManager.setTileBoundariesVisible(enabled);
+    });
+
+    boundariesToggle.appendChild(toggleCheckbox);
+    boundariesToggle.appendChild(toggleLabel);
+    debugSection.appendChild(boundariesToggle);
+
+    this.renderingPanel.appendChild(debugSection);
+  }
+
   private setupCamera(): void {
     // Initial camera scene position based on conceptual position and origin offset
     this.camera.position.subVectors(
@@ -533,10 +505,10 @@ export class App {
 
   private setupLighting(): void {
     // Simple white ambient and directional light
-    this.lights.ambient = new THREE.AmbientLight(0xffffff, 0.4);
+    this.lights.ambient = new THREE.AmbientLight(0xffffff, 0.15);
     this.scene.add(this.lights.ambient);
 
-    this.lights.directional = new THREE.DirectionalLight(0xffffff, 0.6);
+    this.lights.directional = new THREE.DirectionalLight(0xffffff, 0.9);
     this.lights.directional.position.set(50, 100, 20);
     this.lights.directional.castShadow = false;
     this.scene.add(this.lights.directional);
