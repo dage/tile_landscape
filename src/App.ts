@@ -118,7 +118,8 @@ export class App {
     this.createFogControls();
     this.createRenderingExperimentControls();
     this.createWireframeToggle();
-    this.createTileBoundariesToggle();
+
+    this.scene.add(this.camera);
   }
 
   private createFogControls(): void {
@@ -452,40 +453,6 @@ export class App {
     this.renderingPanel.appendChild(wireframeSection);
   }
 
-  private createTileBoundariesToggle(): void {
-    const debugSection = document.createElement('div');
-    debugSection.style.marginBottom = '15px';
-
-    const debugTitle = document.createElement('h3');
-    debugTitle.innerText = 'Debug Settings';
-    debugTitle.style.margin = '0 0 10px 0';
-    debugTitle.style.fontSize = '14px';
-    debugSection.appendChild(debugTitle);
-
-    // Create the toggle for tile boundaries
-    const boundariesToggle = document.createElement('div');
-
-    const toggleCheckbox = document.createElement('input');
-    toggleCheckbox.type = 'checkbox';
-    toggleCheckbox.id = 'tileBoundariesToggle';
-
-    const toggleLabel = document.createElement('label');
-    toggleLabel.innerText = 'Show Tile Boundaries';
-    toggleLabel.htmlFor = 'tileBoundariesToggle';
-    toggleLabel.style.marginLeft = '5px';
-
-    toggleCheckbox.addEventListener('change', (event) => {
-      const enabled = (event.target as HTMLInputElement).checked;
-      this.tileGridManager.setTileBoundariesVisible(enabled);
-    });
-
-    boundariesToggle.appendChild(toggleCheckbox);
-    boundariesToggle.appendChild(toggleLabel);
-    debugSection.appendChild(boundariesToggle);
-
-    this.renderingPanel.appendChild(debugSection);
-  }
-
   private setupCamera(): void {
     // Initial camera scene position based on conceptual position and origin offset
     this.camera.position.subVectors(
@@ -608,45 +575,55 @@ export class App {
     }
 
     // Update debug info box
-    {
-      const cx = this.conceptualCameraPosition.x;
-      const cz = this.conceptualCameraPosition.z;
-      const ox = this.worldOriginOffset.x;
-      const oz = this.worldOriginOffset.z;
-      const camGridX = Math.round(cx / TILE_SIZE);
-      const camGridZ = Math.round(cz / TILE_SIZE);
-      const fracX = ((cx % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
-      const fracZ = ((cz % TILE_SIZE) + TILE_SIZE) % TILE_SIZE;
-      this.infoBox.innerText =
-        `Controls: Speed=${this.controls.speed.toFixed(1)}, Height=${this.controls.height.toFixed(1)}\n` +
-        `Rotation: X=${((this.controls.rotationX * 180) / Math.PI).toFixed(0)}°, Y=${((this.controls.rotationY * 180) / Math.PI).toFixed(0)}°\n` +
-        `Direction: (${direction.x.toFixed(2)}, ${direction.y.toFixed(2)}, ${direction.z.toFixed(2)})\n` +
-        `Movement: Δx=${direction.x.toFixed(2)}, Δy=${direction.y.toFixed(2)}, Δz=${direction.z.toFixed(2)}\n` +
-        `Conceptual Cam Pos: x=${cx.toFixed(2)}, z=${cz.toFixed(2)}\n` +
-        `World Origin Offset: x=${ox.toFixed(2)}, z=${oz.toFixed(2)}\n` +
-        `Grid Coords: (${camGridX}, ${camGridZ})\n` +
-        `Frac In Tile: x=${fracX.toFixed(2)}, z=${fracZ.toFixed(2)}\n` +
-        `Shift Threshold: ${FLOATING_ORIGIN_SHIFT_THRESHOLD}`;
-    }
+    this.updateInfoBox();
     this.renderer.render(this.scene, this.camera);
   }
 
+  private updateInfoBox(): void {
+    const camPos = this.conceptualCameraPosition;
+    const originOffset = this.worldOriginOffset;
+    const camScenePos = this.camera.position;
+
+    this.infoBox.innerText = `
+Conceptual Camera: X: ${camPos.x.toFixed(2)}, Y: ${camPos.y.toFixed(
+      2
+    )}, Z: ${camPos.z.toFixed(2)}
+World Origin Offset: X: ${originOffset.x.toFixed(2)}, Y: ${originOffset.y.toFixed(
+      2
+    )}, Z: ${originOffset.z.toFixed(2)}
+Camera Scene Pos: X: ${camScenePos.x.toFixed(2)}, Y: ${camScenePos.y.toFixed(
+      2
+    )}, Z: ${camScenePos.z.toFixed(2)}
+
+Grid Coords (Cam): X: ${Math.round(camPos.x / TILE_SIZE)}, Z: ${Math.round(
+      camPos.z / TILE_SIZE
+    )}
+Fractional Tile Pos: X: ${((camPos.x % TILE_SIZE) / TILE_SIZE).toFixed(
+      2
+    )}, Z: ${((camPos.z % TILE_SIZE) / TILE_SIZE).toFixed(2)}
+Shift Threshold: ${FLOATING_ORIGIN_SHIFT_THRESHOLD.toFixed(2)}
+
+Controls:
+Speed: ${this.controls.speed.toFixed(2)} (W/S or Mouse Wheel)
+Rotation X: ${this.controls.rotationX.toFixed(2)} (Mouse Y / Q/Z)
+Rotation Y: ${this.controls.rotationY.toFixed(2)} (Mouse X / A/D)
+Height: ${this.controls.height.toFixed(2)} (R/F)
+    `;
+  }
+
   public dispose(): void {
-    window.removeEventListener('resize', this.onWindowResize);
     this.renderer.setAnimationLoop(null);
     this.tileGridManager.dispose();
     this.cameraController.dispose();
     this.renderer.dispose();
-    // Remove debug info box
-    document.body.removeChild(this.infoBox);
-    // Remove rendering panel
+    if (this.infoBox.parentElement) {
+      this.infoBox.parentElement.removeChild(this.infoBox);
+    }
     if (this.renderingPanel && this.renderingPanel.parentElement) {
       this.renderingPanel.parentElement.removeChild(this.renderingPanel);
     }
-    // Dispose of current experiment if any
     if (this.currentExperiment) {
       this.currentExperiment.dispose();
     }
-    // Consider disposing scene geometries/materials if not handled by managers
   }
 }

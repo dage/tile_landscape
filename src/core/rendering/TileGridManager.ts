@@ -5,15 +5,16 @@ interface TerrainTile {
   mesh: THREE.Mesh;
   conceptualGridX: number;
   conceptualGridZ: number;
-  boundaryMesh?: THREE.Object3D; // Changed from LineSegments to Object3D to be more generic
+  markerMesh?: THREE.Mesh; // Replaced boundaryMesh with markerMesh
+  centerMarkerMesh?: THREE.Mesh; // New larger green sphere
 }
 
 export class TileGridManager {
   private scene: THREE.Scene;
   private tiles: TerrainTile[][] = [];
   private sharedTerrainMaterial: THREE.Material;
-  private boundariesVisible: boolean = false; // Track visibility state
-  private boundaryMaterial: THREE.LineBasicMaterial;
+  private markerMaterial: THREE.Material; // For the new sphere markers
+  private centerMarkerMaterial: THREE.Material; // For the larger green sphere
 
   private lastCameraGridX: number = -Infinity;
   private lastCameraGridZ: number = -Infinity;
@@ -31,12 +32,14 @@ export class TileGridManager {
       vertexColors: true,
     });
 
-    // Create a material for boundaries
-    this.boundaryMaterial = new THREE.LineBasicMaterial({
-      color: 0x00ffff, // Cyan color for visibility
-      transparent: true,
-      opacity: 0.4,
-      depthWrite: true,
+    // Create a material for markers
+    this.markerMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0000, // Red color for visibility
+    });
+
+    // Create a material for the center green markers
+    this.centerMarkerMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff00, // Green color
     });
 
     this.initGrid();
@@ -180,6 +183,7 @@ export class TileGridManager {
           ),
           conceptualGridX: 0,
           conceptualGridZ: 0,
+          // markerMesh will be created in recycleTiles
         };
         this.tiles[r][c] = tile;
         this.scene.add(tile.mesh);
@@ -216,24 +220,7 @@ export class TileGridManager {
           0 - worldOriginOffset.y, // Assuming terrain base is at y=0 conceptually
           conceptualTileWorldZ - worldOriginOffset.z
         );
-
-        // Also update the boundary position if it exists
-        if (tile.boundaryMesh) {
-          const tileScenePosition = new THREE.Vector3(
-            conceptualTileWorldX - worldOriginOffset.x,
-            0.05 - worldOriginOffset.y, // Slightly above ground to avoid z-fighting
-            conceptualTileWorldZ - worldOriginOffset.z
-          );
-
-          tile.boundaryMesh.position.copy(tileScenePosition);
-
-          // Also update corner markers
-          if ((tile.boundaryMesh as any).cornerMarkers) {
-            (tile.boundaryMesh as any).cornerMarkers.position.copy(
-              tileScenePosition
-            );
-          }
-        }
+        // The markerMesh is a child of tile.mesh, so its position updates automatically.
       }
     }
   }
@@ -270,98 +257,66 @@ export class TileGridManager {
             targetConceptualGridZ
           );
 
-          // Clean up old boundary mesh if it exists
-          if (tile.boundaryMesh) {
-            this.scene.remove(tile.boundaryMesh);
-
-            // Also remove corner markers
-            if ((tile.boundaryMesh as any).cornerMarkers) {
-              this.scene.remove((tile.boundaryMesh as any).cornerMarkers);
+          // Clean up old marker mesh if it exists
+          if (tile.markerMesh) {
+            tile.mesh.remove(tile.markerMesh); // Remove from parent tile mesh
+            if (tile.markerMesh.geometry) {
+              tile.markerMesh.geometry.dispose();
             }
-
-            if ((tile.boundaryMesh as THREE.Line).geometry) {
-              (tile.boundaryMesh as THREE.Line).geometry.dispose();
+          }
+          // Clean up old center marker mesh if it exists
+          if (tile.centerMarkerMesh) {
+            tile.mesh.remove(tile.centerMarkerMesh); // Remove from parent tile mesh
+            if (tile.centerMarkerMesh.geometry) {
+              tile.centerMarkerMesh.geometry.dispose();
             }
           }
 
-          // Create new boundary for this tile
-          this.createTileBoundary(tile);
+          // Create new markers for this tile
+          this.createTileMarkers(tile);
         }
       }
     }
   }
 
   /**
-   * Creates a wireframe boundary for a tile
+   * Creates sphere markers for a tile.
    */
-  private createTileBoundary(tile: TerrainTile): void {
-    // Create a simple square outline at the exact tile perimeter
-    const halfSize = TILE_SIZE / 2;
+  private createTileMarkers(tile: TerrainTile): void {
+    // Small red marker for a corner
+    const smallSphereRadius = 1;
+    const sphereSegments = 8;
+    const halfTileSize = TILE_SIZE / 2;
+    const smallMarkerGeometry = new THREE.SphereGeometry(
+      smallSphereRadius,
+      sphereSegments,
+      sphereSegments
+    );
+    const markerMesh = new THREE.Mesh(smallMarkerGeometry, this.markerMaterial);
+    // Position the red marker at a corner of the tile (e.g., bottom-left relative to local origin)
+    markerMesh.position.set(
+      -halfTileSize,
+      smallSphereRadius + 0.5, // Slightly above the tile plane
+      -halfTileSize
+    );
+    tile.markerMesh = markerMesh;
+    tile.mesh.add(markerMesh); // Add as child of the tile mesh
 
-    // Create exactly 4 points for the corners of the tile
-    const points = [
-      new THREE.Vector3(-halfSize, 0, -halfSize), // Bottom left
-      new THREE.Vector3(halfSize, 0, -halfSize), // Bottom right
-      new THREE.Vector3(halfSize, 0, halfSize), // Top right
-      new THREE.Vector3(-halfSize, 0, halfSize), // Top left
-      new THREE.Vector3(-halfSize, 0, -halfSize), // Close the loop
-    ];
-
-    // Create geometry from the points
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-    // Use LineLoop for a continuous line
-    const boundaryMesh = new THREE.LineLoop(geometry, this.boundaryMaterial);
-    boundaryMesh.visible = this.boundariesVisible;
-
-    // Add small vertical markers at the corners for better visibility
-    const cornerMarkers = new THREE.Group();
-    const markerHeight = 5;
-
-    // Add a small vertical line at each corner
-    for (let i = 0; i < 4; i++) {
-      const cornerPoint = points[i].clone();
-      const markerPoints = [
-        cornerPoint,
-        cornerPoint.clone().setY(markerHeight),
-      ];
-
-      const markerGeometry = new THREE.BufferGeometry().setFromPoints(
-        markerPoints
-      );
-      const marker = new THREE.Line(markerGeometry, this.boundaryMaterial);
-      cornerMarkers.add(marker);
-    }
-
-    // Add the corner markers to the scene
-    cornerMarkers.visible = this.boundariesVisible;
-    this.scene.add(cornerMarkers);
-
-    // Store the corner markers with the boundary mesh for disposal later
-    (boundaryMesh as any).cornerMarkers = cornerMarkers;
-
-    // Store reference to the boundary mesh
-    tile.boundaryMesh = boundaryMesh;
-
-    // Add boundary mesh to scene
-    this.scene.add(boundaryMesh);
-  }
-
-  /**
-   * Set visibility of tile boundaries for debugging
-   */
-  public setTileBoundariesVisible(visible: boolean): void {
-    this.boundariesVisible = visible;
-
-    // Update visibility of all boundary meshes
-    for (let r = 0; r < GRID_DIMENSION; r++) {
-      for (let c = 0; c < GRID_DIMENSION; c++) {
-        const tile = this.tiles[r][c];
-        if (tile.boundaryMesh) {
-          tile.boundaryMesh.visible = visible;
-        }
-      }
-    }
+    // Larger green center marker
+    const largeSphereRadius = 3; // Larger radius
+    const largeMarkerGeometry = new THREE.SphereGeometry(
+      largeSphereRadius,
+      sphereSegments, // Can use same segments or more if detail is needed
+      sphereSegments
+    );
+    const centerMarkerMesh = new THREE.Mesh(
+      largeMarkerGeometry,
+      this.centerMarkerMaterial
+    );
+    // Position it slightly higher than the small marker, or at terrain height if calculated
+    centerMarkerMesh.position.set(0, largeSphereRadius + 0.5, 0); // Adjust Y as needed
+    tile.centerMarkerMesh = centerMarkerMesh;
+    tile.mesh.add(centerMarkerMesh);
   }
 
   /**
@@ -399,17 +354,18 @@ export class TileGridManager {
           tile.mesh.geometry.dispose();
         }
 
-        // Clean up boundary mesh
-        if (tile.boundaryMesh) {
-          this.scene.remove(tile.boundaryMesh);
-
-          // Also remove corner markers
-          if ((tile.boundaryMesh as any).cornerMarkers) {
-            this.scene.remove((tile.boundaryMesh as any).cornerMarkers);
+        // Clean up marker mesh
+        if (tile.markerMesh) {
+          tile.mesh.remove(tile.markerMesh); // Remove from parent tile mesh
+          if (tile.markerMesh.geometry) {
+            tile.markerMesh.geometry.dispose();
           }
-
-          if ((tile.boundaryMesh as THREE.Line).geometry) {
-            (tile.boundaryMesh as THREE.Line).geometry.dispose();
+        }
+        // Clean up center marker mesh
+        if (tile.centerMarkerMesh) {
+          tile.mesh.remove(tile.centerMarkerMesh);
+          if (tile.centerMarkerMesh.geometry) {
+            tile.centerMarkerMesh.geometry.dispose();
           }
         }
       })
@@ -419,8 +375,11 @@ export class TileGridManager {
       this.sharedTerrainMaterial.dispose();
     }
 
-    if (this.boundaryMaterial) {
-      this.boundaryMaterial.dispose();
+    if (this.markerMaterial) {
+      this.markerMaterial.dispose();
+    }
+    if (this.centerMarkerMaterial) {
+      this.centerMarkerMaterial.dispose();
     }
   }
 }
