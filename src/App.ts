@@ -898,10 +898,18 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       worldPos.copy(particle.position);
       worldPos.add(this.worldOriginOffset);
 
-      // Move the particle along its normal vector in world space
-      worldPos.x += normal.x * velocity * deltaTime;
+      // Move the particle along its normal vector in world space with slightly curved trajectory
+      // Add a small sideways motion based on age for a more interesting path
+      const sideMotion = Math.sin(age * 1.5) * 0.5;
+      const sideVector = new THREE.Vector3()
+        .crossVectors(normal, new THREE.Vector3(1, 0, 0))
+        .normalize();
+
+      worldPos.x +=
+        normal.x * velocity * deltaTime + sideVector.x * sideMotion * deltaTime;
       worldPos.y += normal.y * velocity * deltaTime;
-      worldPos.z += normal.z * velocity * deltaTime;
+      worldPos.z +=
+        normal.z * velocity * deltaTime + sideVector.z * sideMotion * deltaTime;
 
       // Convert back to scene coordinates for rendering
       particle.position.copy(worldPos);
@@ -910,30 +918,53 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       // Apply visual effects based on lifetime
 
       // 1. Fade out as the particle reaches end of life
-      if (lifePercentage > 0.7) {
-        // Start fading out at 70% of life
-        const fadePercentage = (lifePercentage - 0.7) / 0.3;
+      if (lifePercentage > 0.6) {
+        // Start fading out at 60% of life
+        const fadePercentage = (lifePercentage - 0.6) / 0.4;
         if (particle.material instanceof MeshBasicMaterial) {
-          particle.material.opacity = 0.8 * (1 - fadePercentage);
+          particle.material.opacity = 0.9 * (1 - fadePercentage);
         }
       }
 
       // 2. Gradually decrease size
-      const sizeFactor = 1 - lifePercentage * 0.9; // Shrink to 10% of original size at end of life
-      particle.scale.set(
-        initialSize * sizeFactor,
-        initialSize * sizeFactor,
-        initialSize * sizeFactor
-      );
+      const sizeCurve = 1 - Math.pow(lifePercentage, 2); // Non-linear size reduction (faster at the end)
+      const sizeFactor = 0.1 + sizeCurve * 0.9; // Keep at least 10% size until the end
 
       // 3. Add a pulsating effect
-      const pulseFreq = 2 + Math.sin(age * 3) * 0.2; // Pulsation frequency
-      const pulseAmp = 0.1; // Pulsation amplitude
+      const pulseFreq = 3 + Math.sin(age * 2) * 0.5; // Variable pulsation frequency
+      const pulseAmp = 0.1 + lifePercentage * 0.1; // Pulsation increases with age
       const pulseFactor = 1 + Math.sin(age * pulseFreq) * pulseAmp;
-      particle.scale.multiplyScalar(pulseFactor);
 
-      // Check if particle has completed its lifetime or shrunk too small
-      if (age >= lifeTime || sizeFactor < 0.1) {
+      // Apply the combined size factors
+      const finalSize = initialSize * sizeFactor * pulseFactor;
+      particle.scale.set(finalSize, finalSize, finalSize);
+
+      // 4. Color transitions - shift color as the particle ages
+      if (particle.material instanceof MeshBasicMaterial) {
+        if (lifePercentage < 0.3) {
+          // Start with the original color, gradually shift to white at midlife
+          const t = lifePercentage / 0.3;
+          const originalColor = new THREE.Color(
+            particle.material.color.getHex()
+          );
+          const midColor = new THREE.Color(0xffffff);
+          originalColor.lerp(midColor, t);
+          particle.material.color.set(originalColor);
+        } else if (lifePercentage < 0.7) {
+          // From midlife to 70%, maintain white/bright color
+          particle.material.color.set(0xffffff);
+        } else {
+          // In final stage, transition to a redder/warmer color
+          const t = (lifePercentage - 0.7) / 0.3;
+          const brightColor = new THREE.Color(0xffffff);
+          const fadeColor = new THREE.Color(0xff3300); // Warm orange/red for fading
+          brightColor.lerp(fadeColor, t);
+          particle.material.color.set(brightColor);
+        }
+      }
+
+      // Check if particle has completed its lifetime
+      if (age >= lifeTime || sizeFactor < 0.15) {
         // Reset this particle
         this.resetParticle(i);
         // Adjust index since resetParticle might have swapped this particle
@@ -945,7 +976,7 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
     this.groundLightParticles.spawnTimer += deltaTime;
 
     // Only try spawning if we have inactive particles and enough time has passed
-    const spawnProbability = 0.8; // 80% chance per second
+    const spawnProbability = 0.9; // 90% chance per second
     const spawnInterval = 1.0 / 15; // At most 15 particles per second
 
     if (
@@ -1001,21 +1032,36 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       ages[index] = 0;
 
       // Randomize particle lifetime - how long it will live
-      const particleLifetime = 5 + Math.random() * 5; // 5-10 seconds lifespan
+      const particleLifetime = 4 + Math.random() * 6; // 4-10 seconds lifespan
       lifeTimes[index] = particleLifetime;
 
       // Set initial material properties
       if (particles[index].material instanceof MeshBasicMaterial) {
-        particles[index].material.opacity = 0.8;
+        // Random bright color for new particles
+        const colorOptions = [
+          0xff2097, // Bright pink
+          0x20aaff, // Bright blue
+          0xaaff20, // Bright green
+          0xff7700, // Orange
+          0x9900ff, // Purple
+          0x00ffff, // Cyan
+          0xff00ff, // Magenta
+        ];
+        const color =
+          colorOptions[Math.floor(Math.random() * colorOptions.length)];
+        particles[index].material.color.setHex(color);
+        particles[index].material.opacity = 0.9;
       }
 
       // Update particle properties
       basePositions[index].copy(spawnPos);
       normals[index].copy(newNormal);
-      velocities[index] = 8 + Math.random() * 17; // Slightly slower velocities for longer visibility
 
-      // Randomize the max height based on lifespan rather than a fixed value
-      const riseHeight = 40 + Math.random() * 40;
+      // Slower velocities for longer visibility and more interesting effects
+      velocities[index] = 6 + Math.random() * 14;
+
+      // Set a max height based on velocity and lifetime to ensure proper lifetime
+      const riseHeight = 40 + Math.random() * 60;
       maxHeights[index] = terrainHeight + riseHeight;
 
       // Set initial scale based on the stored initial size
