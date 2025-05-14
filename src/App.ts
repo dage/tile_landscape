@@ -16,6 +16,22 @@ import type { RenderingExperiment } from './core/rendering/experiments/Rendering
 import { BumpMappingExperiment } from './core/rendering/experiments/BumpMappingExperiment';
 import { CustomShaderExperiment } from './core/rendering/experiments/CustomShaderExperiment';
 import { getHeight } from '@/core/terrain/terrainApi';
+// import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'; // Removed
+import { generateHeightmap } from './core/terrain/heightmapGenerator';
+// import { Water } from './core/water/Water'; // Removed
+// import { setupGUI } from './core/gui/gui'; // Removed
+import {
+  BackSide,
+  BoxGeometry,
+  Mesh,
+  ShaderMaterial,
+  TextureLoader,
+  Points,
+  PointsMaterial,
+  BufferGeometry,
+  Float32BufferAttribute,
+  MeshBasicMaterial,
+} from 'three';
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -48,22 +64,25 @@ export class App {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setClearColor(0x101020); // Dark background
+
+    // Define a single uniform color for sky, fog, and clear color
+    const uniformSkyAndFogColor = new THREE.Color(0x040410);
+
+    this.renderer.setClearColor(uniformSkyAndFogColor.clone());
 
     // Initialize camera first as fog depends on its .far property
     this.camera = new THREE.PerspectiveCamera(
       75,
       window.innerWidth / window.innerHeight,
       0.1,
-      1000
+      10000
     );
 
     this.scene = new THREE.Scene();
-    // Restore fog to specified defaults
     this.scene.fog = new THREE.Fog(
-      0x101020, // color
-      100, // near
-      400 // far
+      uniformSkyAndFogColor.clone(), // Use the uniform color for fog
+      200, // Near distance for fog start
+      500 // Far distance for full fog
     );
 
     this.clock = new THREE.Clock();
@@ -130,6 +149,44 @@ export class App {
     this.createWireframeToggle();
 
     this.scene.add(this.camera);
+
+    // Simple uniform sky color using MeshBasicMaterial
+    const skyGeo = new BoxGeometry(1, 1, 1);
+    const skyMat = new MeshBasicMaterial({
+      color: uniformSkyAndFogColor.clone(),
+      side: BackSide,
+      fog: false,
+      depthWrite: false,
+    });
+    const skyMesh = new Mesh(skyGeo, skyMat);
+    skyMesh.scale.set(5000, 5000, 5000);
+    this.scene.add(skyMesh);
+
+    // Sprinkle 1 k random stars
+    const starGeo = new BufferGeometry();
+    const starVertices = [];
+    const STAR_RADIUS = 4900; // Place stars on a large sphere
+
+    for (let i = 0; i < 3000; i++) {
+      // Generate points on a sphere
+      const theta = Math.random() * 2 * Math.PI;
+      const phi = Math.acos(2 * Math.random() - 1); // Ensures uniform spherical distribution
+
+      const x = STAR_RADIUS * Math.sin(phi) * Math.cos(theta);
+      const y = STAR_RADIUS * Math.sin(phi) * Math.sin(theta);
+      const z = STAR_RADIUS * Math.cos(phi);
+      starVertices.push(x, y, z);
+    }
+    starGeo.setAttribute(
+      'position',
+      new Float32BufferAttribute(starVertices, 3)
+    );
+    this.scene.add(
+      new Points(
+        starGeo,
+        new PointsMaterial({ size: 1, color: 0xffffff, fog: false })
+      )
+    );
   }
 
   private createFogControls(): void {
