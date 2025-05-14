@@ -59,6 +59,7 @@ export class App {
     directional: null as unknown as THREE.DirectionalLight,
   };
   private currentExperiment: RenderingExperiment = new NoopExperiment();
+  private starField: THREE.Points;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -181,12 +182,11 @@ export class App {
       'position',
       new Float32BufferAttribute(starVertices, 3)
     );
-    this.scene.add(
-      new Points(
-        starGeo,
-        new PointsMaterial({ size: 1, color: 0xffffff, fog: false })
-      )
+    this.starField = new Points(
+      starGeo,
+      new PointsMaterial({ size: 1, color: 0xffffff, fog: false })
     );
+    this.scene.add(this.starField);
   }
 
   private createFogControls(): void {
@@ -690,6 +690,11 @@ export class App {
           );
         }
       }
+    }
+
+    // Re-center star field on camera to avoid jitter during floating origin
+    if (this.starField) {
+      this.starField.position.copy(this.camera.position);
     }
 
     // Update debug info box
