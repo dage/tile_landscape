@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { TILE_SIZE, GRID_DIMENSION } from '@/core/constants';
+import {
+  initializeTerrainApi,
+  getHeight,
+  getSurfaceNormal,
+} from '@/core/terrain/terrainApi';
 
 interface TerrainTile {
   mesh: THREE.Mesh;
@@ -21,6 +26,9 @@ export class TileGridManager {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+
+    // Initialize the terrain API (generates/loads heightmap)
+    initializeTerrainApi();
 
     // Use a standard material with lighting/fog
     this.sharedTerrainMaterial = new THREE.MeshStandardMaterial({
@@ -56,45 +64,44 @@ export class TileGridManager {
   ): THREE.BufferGeometry {
     // Create base plane geometry
     const geometry = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, 32, 32);
+    geometry.rotateX(-Math.PI / 2); // Rotate to be horizontal (Y-up)
 
-    // Rotate to be horizontal (Y-up)
-    geometry.rotateX(-Math.PI / 2);
-
-    // Access position attribute for modification
     const positions = geometry.attributes.position;
     const vertex = new THREE.Vector3();
-
-    // First delete the normal attribute - we'll recompute it
-    geometry.deleteAttribute('normal');
+    const normal = new THREE.Vector3();
 
     // Calculate the world offset for this tile
-    const tileOffsetX = gridX * TILE_SIZE;
-    const tileOffsetZ = gridZ * TILE_SIZE;
+    const tileWorldOriginX = gridX * TILE_SIZE;
+    const tileWorldOriginZ = gridZ * TILE_SIZE;
 
-    // Apply noise-based displacement to each vertex
+    // Apply displacement from heightmap and calculate normals
     for (let i = 0; i < positions.count; i++) {
       vertex.fromBufferAttribute(positions, i);
 
-      // Apply noise with parameters matching original shader
-      const noiseScale = 0.015;
-      const heightScale = 15.0;
+      // Calculate conceptual world position of this vertex
+      const conceptualWorldX = vertex.x + tileWorldOriginX;
+      const conceptualWorldZ = vertex.z + tileWorldOriginZ;
 
-      // Adjust for tile position in world to get continuous noise
-      const worldX = (vertex.x + tileOffsetX) * noiseScale;
-      const worldZ = (vertex.z + tileOffsetZ) * noiseScale;
-
-      // Apply simplified noise function
-      const height = this.simplifiedNoise(worldX, worldZ) * heightScale;
-
-      // Set Y-coordinate for height
-      vertex.y = height;
-
-      // Write back to buffer
+      // Get height from new Terrain API
+      vertex.y = getHeight(conceptualWorldX, conceptualWorldZ);
       positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
     }
 
-    // Recompute normals for proper lighting
-    geometry.computeVertexNormals();
+    // Recompute normals AFTER heights are set using the new Terrain API
+    geometry.deleteAttribute('normal'); // Remove existing normals
+    const normals = new Float32Array(positions.count * 3);
+    for (let i = 0; i < positions.count; i++) {
+      vertex.fromBufferAttribute(positions, i); // Vertex in local tile space, but its Y is now world height relative to tile
+      // For normal calculation, we need its conceptual world position.
+      const conceptualWorldX = vertex.x + tileWorldOriginX;
+      const conceptualWorldZ = vertex.z + tileWorldOriginZ;
+
+      getSurfaceNormal(conceptualWorldX, conceptualWorldZ, normal);
+      normals[i * 3] = normal.x;
+      normals[i * 3 + 1] = normal.y;
+      normals[i * 3 + 2] = normal.z;
+    }
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
     // Height-based coloring using vertex colors
     const colors = new Float32Array(positions.count * 3);
@@ -102,15 +109,18 @@ export class TileGridManager {
 
     // Enhanced color palette for more variation
     const colorStops = [
-      { height: -10.0, color: new THREE.Color(0x224411) }, // Deep valleys - dark forest
-      { height: -2.0, color: new THREE.Color(0x336622) }, // Low areas - forest green
-      { height: 5.0, color: new THREE.Color(0x669944) }, // Mid-level - grassy
-      { height: 10.0, color: new THREE.Color(0x998866) }, // High ground - rocky
-      { height: 15.0, color: new THREE.Color(0xaabbcc) }, // Peaks - snowy blue-gray
+      { height: -70.0, color: new THREE.Color(0x224411) }, // Deep valleys - dark forest
+      { height: -20.0, color: new THREE.Color(0x336622) }, // Low areas - forest green
+      { height: 10.0, color: new THREE.Color(0x669944) }, // Mid-level - grassy
+      { height: 50.0, color: new THREE.Color(0x998866) }, // High ground - rocky
+      { height: 90.0, color: new THREE.Color(0xaabbcc) }, // Peaks - snowy blue-gray
     ];
 
     for (let i = 0; i < positions.count; i++) {
       vertex.fromBufferAttribute(positions, i);
+      // For color, we also need conceptual world X, Z for consistent color noise
+      const conceptualWorldX = vertex.x + tileWorldOriginX;
+      const conceptualWorldZ = vertex.z + tileWorldOriginZ;
 
       // Find the appropriate color segment based on height
       let colorIndex = 0;
@@ -132,12 +142,11 @@ export class TileGridManager {
       const segmentSize = upperStop.height - lowerStop.height;
       let t = (vertex.y - lowerStop.height) / segmentSize;
 
-      // Add a subtle noise factor to the color interpolation for more variation
-      const noiseValue =
-        this.simplifiedNoise(
-          (gridX + vertex.x) * 0.05,
-          (gridZ + vertex.z) * 0.05
-        ) * 0.15;
+      // Adjust for tile position in world to get continuous noise for color
+      const colorNoiseX = conceptualWorldX * 0.05; // Corrected: Apply 0.05 to the full conceptualWorldX
+      const colorNoiseZ = conceptualWorldZ * 0.05; // Corrected: Apply 0.05 to the full conceptualWorldZ
+
+      const noiseValue = this.simplifiedNoise(colorNoiseX, colorNoiseZ) * 0.15;
       t = THREE.MathUtils.clamp(t + noiseValue, 0, 1);
 
       // Interpolate between the two colors in this segment
@@ -159,7 +168,8 @@ export class TileGridManager {
    * A simplified noise function that creates terrain-like variation
    */
   private simplifiedNoise(x: number, z: number): number {
-    // Simplified noise function that approximates the shader noise
+    // This simplifiedNoise is now only used for color variation.
+    // It can remain as is, or be replaced if a different color noise pattern is desired.
     const nx =
       Math.sin(x * 1.5) * 0.5 +
       Math.sin(x * 3.7 + z * 2.3) * 0.25 +
