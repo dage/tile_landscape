@@ -62,7 +62,7 @@ export class TileGridManager {
     gridX: number,
     gridZ: number
   ): THREE.BufferGeometry {
-    // Create base plane geometry
+    // Create base plane geometry with sufficient subdivisions
     const geometry = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, 32, 32);
     geometry.rotateX(-Math.PI / 2); // Rotate to be horizontal (Y-up)
 
@@ -87,16 +87,20 @@ export class TileGridManager {
       positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
     }
 
-    // Recompute normals AFTER heights are set using the new Terrain API
+    // Compute vertex normals
     geometry.deleteAttribute('normal'); // Remove existing normals
     const normals = new Float32Array(positions.count * 3);
+
     for (let i = 0; i < positions.count; i++) {
-      vertex.fromBufferAttribute(positions, i); // Vertex in local tile space, but its Y is now world height relative to tile
-      // For normal calculation, we need its conceptual world position.
+      vertex.fromBufferAttribute(positions, i);
       const conceptualWorldX = vertex.x + tileWorldOriginX;
       const conceptualWorldZ = vertex.z + tileWorldOriginZ;
 
+      // Calculate normal for ALL vertices using getSurfaceNormal
+      // This ensures that if two vertices from adjacent tiles share the same
+      // conceptual world coordinate (e.g., at a seam), they get the same normal.
       getSurfaceNormal(conceptualWorldX, conceptualWorldZ, normal);
+
       normals[i * 3] = normal.x;
       normals[i * 3 + 1] = normal.y;
       normals[i * 3 + 2] = normal.z;

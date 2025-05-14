@@ -1,4 +1,5 @@
 // src/core/terrain/heightmapGenerator.ts
+import { createNoise4D } from 'simplex-noise';
 
 export interface HeightmapData {
   data: Float32Array;
@@ -10,17 +11,21 @@ export interface HeightmapData {
 // Size must be (2^n + 1) for Diamond-Square. e.g., 257, 513, 1025
 const DEFAULT_MAP_SIZE = 1025;
 const DEFAULT_WORLD_SCALE = 2048; // World units the heightmap covers before repeating
-const ROUGHNESS_FACTOR = 0.7; // Range [0,1]. Higher = rougher. Affects how fast random range decreases.
-const INITIAL_AMPLITUDE = 150; // Initial range for random displacement, effectively max height variation.
+// const ROUGHNESS_FACTOR = 0.7; // No longer directly used by simplex like this
+// const INITIAL_AMPLITUDE = 150; // Will be controlled by simplex parameters
+
+// Simplex noise parameters
+const SIMPLEX_FEATURE_SCALE = 2.5; // Controls how "zoomed-in" the noise is. Larger = more features.
+const SIMPLEX_OCTAVES = 5;
+const SIMPLEX_PERSISTENCE = 0.5; // How much amplitude decreases per octave
+const SIMPLEX_LACUNARITY = 2.0; // How much frequency increases per octave
+const SIMPLEX_INITIAL_AMPLITUDE = 75.0; // Overall scale of the noise
 
 let memoizedHeightmap: HeightmapData | null = null;
-
-function dsRandom(): number {
-  return Math.random() * 2 - 1; // Returns a random number between -1 and 1
-}
+let noise4D: (x: number, y: number, z: number, w: number) => number;
 
 /**
- * Generates a tileable heightmap using the Diamond-Square algorithm.
+ * Generates a tileable heightmap using 4D Simplex noise for fractal terrain.
  * The result is memoized for performance.
  */
 export function generateHeightmap(
@@ -28,22 +33,7 @@ export function generateHeightmap(
   mapHeight: number = DEFAULT_MAP_SIZE,
   worldScale: number = DEFAULT_WORLD_SCALE
 ): HeightmapData {
-  if (mapWidth !== mapHeight) {
-    console.warn(
-      'Diamond-Square requires mapWidth === mapHeight. Using mapWidth for both.'
-    );
-    mapHeight = mapWidth;
-  }
-  // Check if mapWidth is of the form 2^n + 1
-  const n = Math.log2(mapWidth - 1);
-  if (n !== Math.floor(n) || mapWidth <= 1) {
-    console.warn(
-      `Diamond-Square map size must be 2^n + 1. Adjusting ${mapWidth} to ${DEFAULT_MAP_SIZE}.`
-    );
-    mapWidth = DEFAULT_MAP_SIZE;
-    mapHeight = DEFAULT_MAP_SIZE;
-  }
-
+  // Memoization check
   if (
     memoizedHeightmap &&
     memoizedHeightmap.width === mapWidth &&
@@ -53,74 +43,60 @@ export function generateHeightmap(
     return memoizedHeightmap;
   }
 
+  if (!noise4D) {
+    noise4D = createNoise4D();
+  }
+
+  if (mapWidth !== mapHeight) {
+    console.warn(
+      'Heightmap requires mapWidth === mapHeight for proper tiling. Using mapWidth for both.'
+    );
+    mapHeight = mapWidth;
+  }
+
   const data = new Float32Array(mapWidth * mapHeight);
-  const size = mapWidth; // Since width and height are the same
+  const size = mapWidth;
 
   console.log(
-    `Generating new ${size}x${size} Diamond-Square heightmap (world scale: ${worldScale})...`
+    `Generating new ${size}x${size} Simplex noise heightmap (world scale: ${worldScale})...`
   );
   const startTime = performance.now();
 
-  // Helper to get/set height, handling wrapping for tileability
-  const getHeight = (x: number, y: number): number => {
-    return data[((y + size) % size) * size + ((x + size) % size)];
-  };
-  const setHeight = (x: number, y: number, value: number): void => {
-    data[((y + size) % size) * size + ((x + size) % size)] = value;
-  };
+  const PI2 = Math.PI * 2;
 
-  // Initialize corners (e.g., to an average height or 0 for simplicity here)
-  // For tileability, all corners could be the same, or from a repeating pattern.
-  // Setting to 0 simplifies, and randomness will build from there.
-  const initialCornerValue = 0;
-  setHeight(0, 0, initialCornerValue);
-  setHeight(size - 1, 0, initialCornerValue);
-  setHeight(0, size - 1, initialCornerValue);
-  setHeight(size - 1, size - 1, initialCornerValue);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Normalize coordinates to [0,1] range for angle calculation
+      const u = x / (size - 1); // Normalized x for periodicity
+      const v = y / (size - 1); // Normalized y for periodicity
 
-  let currentAmplitude = INITIAL_AMPLITUDE;
-  let step = size - 1;
+      let totalHeight = 0;
+      let currentAmplitude = SIMPLEX_INITIAL_AMPLITUDE;
+      let currentFrequencyScale = SIMPLEX_FEATURE_SCALE;
 
-  while (step > 1) {
-    const halfStep = step / 2;
+      for (let i = 0; i < SIMPLEX_OCTAVES; i++) {
+        const angleU = u * PI2;
+        const angleV = v * PI2;
 
-    // Diamond step
-    for (let y = 0; y < size - 1; y += step) {
-      for (let x = 0; x < size - 1; x += step) {
-        const avg =
-          (getHeight(x, y) +
-            getHeight(x + step, y) +
-            getHeight(x, y + step) +
-            getHeight(x + step, y + step)) /
-          4.0;
-        setHeight(
-          x + halfStep,
-          y + halfStep,
-          avg + dsRandom() * currentAmplitude
-        );
+        // Use 4D simplex noise to create a 2D tileable pattern
+        // Map (u,v) to a torus in 4D space
+        const nx = currentFrequencyScale * Math.cos(angleU);
+        const ny = currentFrequencyScale * Math.sin(angleU);
+        const nz = currentFrequencyScale * Math.cos(angleV);
+        const nw = currentFrequencyScale * Math.sin(angleV);
+
+        totalHeight += noise4D(nx, ny, nz, nw) * currentAmplitude;
+
+        currentAmplitude *= SIMPLEX_PERSISTENCE;
+        currentFrequencyScale *= SIMPLEX_LACUNARITY;
       }
+      data[y * size + x] = totalHeight;
     }
-
-    // Square step
-    for (let y = 0; y < size; y += halfStep) {
-      for (let x = (y + halfStep) % step; x < size; x += step) {
-        const avg =
-          (getHeight((x - halfStep + size) % size, y) + // Left
-            getHeight((x + halfStep) % size, y) + // Right
-            getHeight(x, (y - halfStep + size) % size) + // Top
-            getHeight(x, (y + halfStep) % size)) / // Bottom
-          4.0;
-        setHeight(x, y, avg + dsRandom() * currentAmplitude);
-      }
-    }
-
-    currentAmplitude *= Math.pow(2, -ROUGHNESS_FACTOR); // Reduce amplitude
-    step /= 2;
   }
 
   const endTime = performance.now();
   console.log(
-    `Heightmap generation took ${(endTime - startTime).toFixed(2)} ms`
+    `Simplex Heightmap generation took ${(endTime - startTime).toFixed(2)} ms`
   );
 
   memoizedHeightmap = {

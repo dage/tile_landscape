@@ -31,21 +31,27 @@ export function getHeight(worldX: number, worldZ: number): number {
 
   const mapWidth = heightmap.width;
   const mapHeight = heightmap.height;
-  const worldToMapScaleX = mapWidth / heightmap.scale;
-  const worldToMapScaleZ = mapHeight / heightmap.scale;
+
+  // Correct scaling: world distance should map to (mapWidth-1) intervals
+  const effectiveMapWidth = mapWidth > 1 ? mapWidth - 1 : 1;
+  const effectiveMapHeight = mapHeight > 1 ? mapHeight - 1 : 1;
+
+  const worldToMapScaleX = effectiveMapWidth / heightmap.scale;
+  const worldToMapScaleZ = effectiveMapHeight / heightmap.scale;
 
   // Map world coordinates to heightmap coordinates, handling tiling
   // fmod ensures that mapX/mapZ are always positive before the final modulo
   const fmod = (a: number, b: number) => ((a % b) + b) % b;
 
-  let mapX = fmod(worldX * worldToMapScaleX, mapWidth);
-  let mapZ = fmod(worldZ * worldToMapScaleZ, mapHeight);
+  // mapX/mapZ should now be in the range [0, effectiveMapWidth) or [0, effectiveMapHeight)
+  let mapX = fmod(worldX * worldToMapScaleX, effectiveMapWidth);
+  let mapZ = fmod(worldZ * worldToMapScaleZ, effectiveMapHeight);
 
   // Get integer and fractional parts for interpolation
   const x0 = Math.floor(mapX);
   const z0 = Math.floor(mapZ);
-  const x1 = (x0 + 1) % mapWidth; // Wrap around for points at the edge
-  const z1 = (z0 + 1) % mapHeight; // Wrap around
+  const x1 = (x0 + 1) % mapWidth; // Wrap around for points at the edge, use full mapWidth for data array access
+  const z1 = (z0 + 1) % mapHeight; // Wrap around, use full mapHeight for data array access
 
   const fx = mapX - x0;
   const fz = mapZ - z0;
