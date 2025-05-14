@@ -10,16 +10,12 @@ interface TerrainTile {
   mesh: THREE.Mesh;
   conceptualGridX: number;
   conceptualGridZ: number;
-  markerMesh?: THREE.Mesh; // Replaced boundaryMesh with markerMesh
-  centerMarkerMesh?: THREE.Mesh; // New larger green sphere
 }
 
 export class TileGridManager {
   private scene: THREE.Scene;
   private tiles: TerrainTile[][] = [];
   private sharedTerrainMaterial: THREE.Material;
-  private markerMaterial: THREE.Material; // For the new sphere markers
-  private centerMarkerMaterial: THREE.Material; // For the larger green sphere
 
   private lastCameraGridX: number = -Infinity;
   private lastCameraGridZ: number = -Infinity;
@@ -38,16 +34,6 @@ export class TileGridManager {
       flatShading: false,
       side: THREE.FrontSide,
       vertexColors: true,
-    });
-
-    // Create a material for markers
-    this.markerMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff0000, // Red color for visibility
-    });
-
-    // Create a material for the center green markers
-    this.centerMarkerMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00, // Green color
     });
 
     this.initGrid();
@@ -197,7 +183,6 @@ export class TileGridManager {
           ),
           conceptualGridX: -Infinity,
           conceptualGridZ: -Infinity,
-          // markerMesh will be created in recycleTiles
         };
         this.tiles[r][c] = tile;
         this.scene.add(tile.mesh);
@@ -234,7 +219,6 @@ export class TileGridManager {
           0 - worldOriginOffset.y, // Assuming terrain base is at y=0 conceptually
           conceptualTileWorldZ - worldOriginOffset.z
         );
-        // The markerMesh is a child of tile.mesh, so its position updates automatically.
       }
     }
   }
@@ -270,67 +254,9 @@ export class TileGridManager {
             targetConceptualGridX,
             targetConceptualGridZ
           );
-
-          // Clean up old marker mesh if it exists
-          if (tile.markerMesh) {
-            tile.mesh.remove(tile.markerMesh); // Remove from parent tile mesh
-            if (tile.markerMesh.geometry) {
-              tile.markerMesh.geometry.dispose();
-            }
-          }
-          // Clean up old center marker mesh if it exists
-          if (tile.centerMarkerMesh) {
-            tile.mesh.remove(tile.centerMarkerMesh); // Remove from parent tile mesh
-            if (tile.centerMarkerMesh.geometry) {
-              tile.centerMarkerMesh.geometry.dispose();
-            }
-          }
-
-          // Create new markers for this tile
-          this.createTileMarkers(tile);
         }
       }
     }
-  }
-
-  /**
-   * Creates sphere markers for a tile.
-   */
-  private createTileMarkers(tile: TerrainTile): void {
-    // Small red marker for a corner
-    const smallSphereRadius = 1;
-    const sphereSegments = 8;
-    const halfTileSize = TILE_SIZE / 2;
-    const smallMarkerGeometry = new THREE.SphereGeometry(
-      smallSphereRadius,
-      sphereSegments,
-      sphereSegments
-    );
-    const markerMesh = new THREE.Mesh(smallMarkerGeometry, this.markerMaterial);
-    // Position the red marker at a corner of the tile (e.g., bottom-left relative to local origin)
-    markerMesh.position.set(
-      -halfTileSize,
-      smallSphereRadius + 0.5, // Slightly above the tile plane
-      -halfTileSize
-    );
-    tile.markerMesh = markerMesh;
-    tile.mesh.add(markerMesh); // Add as child of the tile mesh
-
-    // Larger green center marker
-    const largeSphereRadius = 3; // Larger radius
-    const largeMarkerGeometry = new THREE.SphereGeometry(
-      largeSphereRadius,
-      sphereSegments, // Can use same segments or more if detail is needed
-      sphereSegments
-    );
-    const centerMarkerMesh = new THREE.Mesh(
-      largeMarkerGeometry,
-      this.centerMarkerMaterial
-    );
-    // Position it slightly higher than the small marker, or at terrain height if calculated
-    centerMarkerMesh.position.set(0, largeSphereRadius + 0.5, 0); // Adjust Y as needed
-    tile.centerMarkerMesh = centerMarkerMesh;
-    tile.mesh.add(centerMarkerMesh);
   }
 
   /**
@@ -367,33 +293,11 @@ export class TileGridManager {
         if (tile.mesh.geometry) {
           tile.mesh.geometry.dispose();
         }
-
-        // Clean up marker mesh
-        if (tile.markerMesh) {
-          tile.mesh.remove(tile.markerMesh); // Remove from parent tile mesh
-          if (tile.markerMesh.geometry) {
-            tile.markerMesh.geometry.dispose();
-          }
-        }
-        // Clean up center marker mesh
-        if (tile.centerMarkerMesh) {
-          tile.mesh.remove(tile.centerMarkerMesh);
-          if (tile.centerMarkerMesh.geometry) {
-            tile.centerMarkerMesh.geometry.dispose();
-          }
-        }
       })
     );
 
     if (this.sharedTerrainMaterial instanceof THREE.Material) {
       this.sharedTerrainMaterial.dispose();
-    }
-
-    if (this.markerMaterial) {
-      this.markerMaterial.dispose();
-    }
-    if (this.centerMarkerMaterial) {
-      this.centerMarkerMaterial.dispose();
     }
   }
 }
