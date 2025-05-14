@@ -564,6 +564,9 @@ export class App {
     newActualCameraY = Math.max(newActualCameraY, terrainFloorY);
     this.conceptualCameraPosition.y = newActualCameraY;
 
+    // Synchronize the camera controller's height with the actual clamped height
+    this.cameraController.setHeight(newActualCameraY);
+
     // 3. Floating Origin Check & Shift
     const shiftDelta = computeShiftDelta(
       this.conceptualCameraPosition,

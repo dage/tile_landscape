@@ -104,6 +104,10 @@ export class CameraController {
     return { ...this.controls };
   }
 
+  public setHeight(newHeight: number): void {
+    this.controls.height = newHeight;
+  }
+
   public dispose(): void {
     this.domElement.removeEventListener(
       'mousemove',

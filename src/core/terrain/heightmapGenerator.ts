@@ -15,11 +15,11 @@ const DEFAULT_WORLD_SCALE = 2048; // World units the heightmap covers before rep
 // const INITIAL_AMPLITUDE = 150; // Will be controlled by simplex parameters
 
 // Simplex noise parameters
-const SIMPLEX_FEATURE_SCALE = 2.5; // Controls how "zoomed-in" the noise is. Larger = more features.
-const SIMPLEX_OCTAVES = 5;
-const SIMPLEX_PERSISTENCE = 0.5; // How much amplitude decreases per octave
+const SIMPLEX_FEATURE_SCALE = 1.5; // Controls how "zoomed-in" the noise is. Larger = more features.
+const SIMPLEX_OCTAVES = 10;
+const SIMPLEX_PERSISTENCE = 0.3; // How much amplitude decreases per octave
 const SIMPLEX_LACUNARITY = 2.0; // How much frequency increases per octave
-const SIMPLEX_INITIAL_AMPLITUDE = 75.0; // Overall scale of the noise
+const SIMPLEX_INITIAL_AMPLITUDE = 125.0; // Overall scale of the noise
 
 let memoizedHeightmap: HeightmapData | null = null;
 let noise4D: (x: number, y: number, z: number, w: number) => number;
