@@ -87,19 +87,19 @@ export class CameraController {
     if (this.isKeyDown['s']) this.controls.rotationX += 0.03;
     if (this.isKeyDown['a']) this.controls.rotationY += 0.03;
     if (this.isKeyDown['d']) this.controls.rotationY -= 0.03;
+
     // Q/Z height
-    if (this.isKeyDown['q']) this.controls.height += 10 * deltaTime;
-    if (this.isKeyDown['z']) {
-      this.controls.height -= 10 * deltaTime;
-    }
+    if (this.isKeyDown['q']) this.controls.height += 50 * deltaTime;
+    if (this.isKeyDown['z']) this.controls.height -= 50 * deltaTime;
+
     // E/R acceleration
     if (this.isKeyDown['e']) this.controls.speed += 180 * deltaTime;
     if (this.isKeyDown['r']) this.controls.speed -= 180 * deltaTime;
-    // Allow negative speed (reverse)
+
     // Limit vertical look
     this.controls.rotationX = Math.max(
-      -Math.PI / 3,
-      Math.min(Math.PI / 3, this.controls.rotationX)
+      -Math.PI / 2,
+      Math.min(Math.PI / 2, this.controls.rotationX)
     );
     return { ...this.controls };
   }
