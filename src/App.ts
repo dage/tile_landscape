@@ -82,8 +82,8 @@ export class App {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(
       uniformSkyAndFogColor.clone(), // Use the uniform color for fog
-      200, // Near distance for fog start
-      500 // Far distance for full fog
+      200, // Near distance for fog start (no change, already 200)
+      400 // Far distance for full fog (changed from 500)
     );
 
     this.clock = new THREE.Clock();
@@ -254,7 +254,7 @@ export class App {
     const nearSlider = createSlider(
       'Fog Near Distance:',
       0,
-      this.camera.far, // Max is camera's far plane
+      2000, // Max changed to 2000
       fogNear,
       10,
       (val) => val.toFixed(0),
@@ -271,7 +271,7 @@ export class App {
     const farSlider = createSlider(
       'Fog Far Distance:',
       0,
-      this.camera.far, // Max is camera's far plane
+      2000, // Max changed to 2000
       fogFar,
       10,
       (val) => val.toFixed(0),
