@@ -91,7 +91,6 @@ export class CameraController {
     if (this.isKeyDown['q']) this.controls.height += 10 * deltaTime;
     if (this.isKeyDown['z']) {
       this.controls.height -= 10 * deltaTime;
-      this.controls.height = Math.max(1, this.controls.height);
     }
     // E/R acceleration
     if (this.isKeyDown['e']) this.controls.speed += 180 * deltaTime;

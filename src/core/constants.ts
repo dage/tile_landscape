@@ -6,3 +6,5 @@ export const CAMERA_INITIAL_HEIGHT = 50.0;
 export const CAMERA_LOOK_AHEAD_DISTANCE = 200.0; // How far the camera looks ahead
 
 export const FLOATING_ORIGIN_SHIFT_THRESHOLD = TILE_SIZE * 1.5; // When camera scene pos exceeds this, shift origin
+
+export const MINIMUM_CAMERA_OFFSET_ABOVE_TERRAIN = 2.0; // Minimum units camera should be above terrain

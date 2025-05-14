@@ -9,11 +9,13 @@ import {
   CAMERA_INITIAL_HEIGHT,
   CAMERA_LOOK_AHEAD_DISTANCE,
   FLOATING_ORIGIN_SHIFT_THRESHOLD,
+  MINIMUM_CAMERA_OFFSET_ABOVE_TERRAIN,
 } from '@/core/constants';
 import { NoopExperiment } from './core/rendering/experiments/RenderingExperiment';
 import type { RenderingExperiment } from './core/rendering/experiments/RenderingExperiment';
 import { BumpMappingExperiment } from './core/rendering/experiments/BumpMappingExperiment';
 import { CustomShaderExperiment } from './core/rendering/experiments/CustomShaderExperiment';
+import { getHeight } from '@/core/terrain/terrainApi';
 
 export class App {
   private renderer: THREE.WebGLRenderer;
@@ -29,6 +31,7 @@ export class App {
   private sceneLookAtTarget: THREE.Vector3; // For camera.lookAt, in scene coordinates
   private infoBox: HTMLDivElement;
   private controls: CameraControls;
+  private lastUserControlsHeight: number;
   private renderingPanel: HTMLDivElement;
   private lights: {
     ambient: THREE.AmbientLight;
@@ -78,6 +81,7 @@ export class App {
       rotationY: 0,
       height: CAMERA_INITIAL_HEIGHT,
     };
+    this.lastUserControlsHeight = CAMERA_INITIAL_HEIGHT;
 
     this.setupCamera();
     this.setupLighting();
@@ -525,21 +529,42 @@ export class App {
   }
 
   private animate(): void {
-    // Original animation logic
     const deltaTime = this.clock.getDelta();
+    const previousActualCameraY = this.conceptualCameraPosition.y; // Actual Y from end of previous frame
 
-    // Update camera controls
+    // Update camera controls (gets user's current absolute desired height)
     this.controls = this.cameraController.update(deltaTime);
+    const currentUserAbsoluteDesiredY = this.controls.height;
 
-    // 1. Update conceptual camera position based on controls
-    // Move in camera's local -Z (forward) direction
+    // 1. Update conceptual camera XZ position based on controls
     const direction = new THREE.Vector3(0, 0, -1);
     direction.applyEuler(new THREE.Euler(0, this.controls.rotationY, 0, 'YXZ'));
     direction.multiplyScalar(this.controls.speed * deltaTime);
     this.conceptualCameraPosition.add(direction);
-    this.conceptualCameraPosition.y = this.controls.height;
+    // Y position is handled next
 
-    // 2. Floating Origin Check & Shift
+    // 2. Determine new Y position with stickiness
+    let newActualCameraY = previousActualCameraY; // Default to staying at the same height
+
+    if (currentUserAbsoluteDesiredY !== this.lastUserControlsHeight) {
+      // User actively changed their desired height this frame (Q or Z pressed)
+      // The new target is the user's explicitly set desired height.
+      newActualCameraY = currentUserAbsoluteDesiredY;
+    }
+    // Update for next frame comparison
+    this.lastUserControlsHeight = currentUserAbsoluteDesiredY;
+
+    // Apply terrain floor collision (bumping up only)
+    const terrainHeight = getHeight(
+      this.conceptualCameraPosition.x,
+      this.conceptualCameraPosition.z
+    );
+    const terrainFloorY = terrainHeight + MINIMUM_CAMERA_OFFSET_ABOVE_TERRAIN;
+
+    newActualCameraY = Math.max(newActualCameraY, terrainFloorY);
+    this.conceptualCameraPosition.y = newActualCameraY;
+
+    // 3. Floating Origin Check & Shift
     const shiftDelta = computeShiftDelta(
       this.conceptualCameraPosition,
       this.worldOriginOffset,
@@ -550,13 +575,13 @@ export class App {
       this.worldOriginOffset.add(shiftDelta);
     }
 
-    // 3. Update camera's actual scene position
+    // 4. Update camera's actual scene position
     this.camera.position.subVectors(
       this.conceptualCameraPosition,
       this.worldOriginOffset
     );
 
-    // 4. Update camera's rotation
+    // 5. Update camera's rotation
     this.camera.rotation.set(
       this.controls.rotationX,
       this.controls.rotationY,
@@ -564,7 +589,7 @@ export class App {
       'YXZ'
     );
 
-    // 5. Update tile grid (recycles tiles, updates their scene positions)
+    // 6. Update tile grid (recycles tiles, updates their scene positions)
     this.tileGridManager.update(
       this.conceptualCameraPosition,
       this.worldOriginOffset,
