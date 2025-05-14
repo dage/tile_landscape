@@ -47,15 +47,20 @@ export class App {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setClearColor(0x101020); // Dark background
 
-    this.scene = new THREE.Scene();
-    // Add neutral fog (same as background)
-    this.scene.fog = new THREE.Fog(0x101020, 200, 400);
-
+    // Initialize camera first as fog depends on its .far property
     this.camera = new THREE.PerspectiveCamera(
       75,
       window.innerWidth / window.innerHeight,
       0.1,
       1000
+    );
+
+    this.scene = new THREE.Scene();
+    // Restore fog to specified defaults
+    this.scene.fog = new THREE.Fog(
+      0x101020, // color
+      100, // near
+      400 // far
     );
 
     this.clock = new THREE.Clock();
@@ -116,6 +121,7 @@ export class App {
     document.body.appendChild(this.renderingPanel);
 
     this.createFogControls();
+    this.createLightingControls();
     this.createRenderingExperimentControls();
     this.createWireframeToggle();
 
@@ -139,6 +145,7 @@ export class App {
       max: number,
       value: number,
       step: number,
+      displayFormatter: (val: number) => string = (val) => val.toFixed(0),
       onChange: (value: number) => void
     ) => {
       const group = document.createElement('div');
@@ -150,9 +157,9 @@ export class App {
       labelElem.style.marginBottom = '2px';
 
       const valueDisplay = document.createElement('span');
-      valueDisplay.innerText = value.toFixed(0);
+      valueDisplay.innerText = displayFormatter(value);
       valueDisplay.style.marginLeft = '10px';
-      valueDisplay.style.minWidth = '30px';
+      valueDisplay.style.minWidth = '40px'; // Adjusted for potentially larger numbers
       valueDisplay.style.display = 'inline-block';
 
       const slider = document.createElement('input');
@@ -166,7 +173,7 @@ export class App {
 
       slider.addEventListener('input', (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
-        valueDisplay.innerText = newValue.toFixed(0);
+        valueDisplay.innerText = displayFormatter(newValue);
         onChange(newValue);
       });
 
@@ -179,19 +186,21 @@ export class App {
 
     // Get initial fog values
     const fog = this.scene.fog as THREE.Fog;
-    const fogNear = fog.near;
-    const fogFar = fog.far;
+    let fogNear = fog.near; // Use let as it might be updated if far changes
+    let fogFar = fog.far;
 
     // Create fog near slider
     const nearSlider = createSlider(
       'Fog Near Distance:',
       0,
-      1000,
+      this.camera.far, // Max is camera's far plane
       fogNear,
       10,
+      (val) => val.toFixed(0),
       (value) => {
         if (value < fog.far) {
           fog.near = value;
+          fogNear = value; // Keep local var in sync for other slider's validation
         }
       }
     );
@@ -201,12 +210,14 @@ export class App {
     const farSlider = createSlider(
       'Fog Far Distance:',
       0,
-      2000,
+      this.camera.far, // Max is camera's far plane
       fogFar,
       10,
+      (val) => val.toFixed(0),
       (value) => {
         if (value > fog.near) {
           fog.far = value;
+          fogFar = value; // Keep local var in sync
         }
       }
     );
@@ -240,9 +251,6 @@ export class App {
     fogSection.appendChild(fogToggle);
 
     this.renderingPanel.appendChild(fogSection);
-
-    // Create lighting controls
-    this.createLightingControls();
   }
 
   private createLightingControls(): void {
@@ -325,6 +333,23 @@ export class App {
       }
     );
     lightingSection.appendChild(directionalSlider);
+
+    // Hemisphere light intensity slider
+    if (this.lights.hemispheric) {
+      const hemiSlider = createSlider(
+        'Hemisphere Light:',
+        0,
+        2, // Max intensity
+        this.lights.hemispheric.intensity,
+        0.01,
+        (value: number) => {
+          if (this.lights.hemispheric) {
+            this.lights.hemispheric.intensity = value;
+          }
+        }
+      );
+      lightingSection.appendChild(hemiSlider);
+    }
 
     this.renderingPanel.appendChild(lightingSection);
   }
@@ -479,6 +504,14 @@ export class App {
     this.lights.directional.position.set(50, 100, 20);
     this.lights.directional.castShadow = false;
     this.scene.add(this.lights.directional);
+
+    // Add HemisphereLight for more natural ambient lighting
+    this.lights.hemispheric = new THREE.HemisphereLight(
+      0x7799bb, // skyColor
+      0x332211, // groundColor
+      0.5 // intensity
+    );
+    this.scene.add(this.lights.hemispheric);
   }
 
   private onWindowResize(): void {

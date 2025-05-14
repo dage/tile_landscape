@@ -1,8 +1,8 @@
 // src/core/rendering/experiments/BumpMappingExperiment.ts
 
 import * as THREE from 'three';
-import { TileGridManager } from '../TileGridManager';
-import type { RenderingExperiment } from './RenderingExperiment';
+import type { TileGridManager } from '@/core/rendering/TileGridManager';
+import type { RenderingExperiment } from '@/core/rendering/experiments/RenderingExperiment';
 
 /**
  * Experiment that adds bump mapping to the terrain
@@ -21,84 +21,68 @@ import type { RenderingExperiment } from './RenderingExperiment';
  */
 export class BumpMappingExperiment implements RenderingExperiment {
   private scene: THREE.Scene;
-  private tileManager: TileGridManager;
-  private bumpTexture: THREE.Texture | null = null;
+  private tileGridManager: TileGridManager;
+  private originalTerrainMaterial: THREE.Material | null = null;
   private bumpMaterial: THREE.MeshStandardMaterial | null = null;
-  private originalMaterial: THREE.Material | null = null;
+  private textureLoader: THREE.TextureLoader;
+  private normalMap: THREE.Texture | null = null;
 
-  constructor(scene: THREE.Scene, tileManager: TileGridManager) {
+  constructor(scene: THREE.Scene, tileGridManager: TileGridManager) {
     this.scene = scene;
-    this.tileManager = tileManager;
+    this.tileGridManager = tileGridManager;
+    this.textureLoader = new THREE.TextureLoader();
   }
 
   async initialize(): Promise<void> {
-    // Create a bump map texture (we could also load one from a file)
-    const textureSize = 256;
-    const data = new Uint8Array(textureSize * textureSize * 4);
+    try {
+      // Load the dynamically generated normal map
+      // Vite serves files from `public` directory at the root, so path is /assets/normal.png
+      this.normalMap = await this.textureLoader.loadAsync('/assets/normal.png');
+      this.normalMap.wrapS = THREE.RepeatWrapping;
+      this.normalMap.wrapT = THREE.RepeatWrapping;
 
-    // Generate a simple procedural noise pattern for the bump map
-    for (let i = 0; i < textureSize; i++) {
-      for (let j = 0; j < textureSize; j++) {
-        const index = (i * textureSize + j) * 4;
+      // It's a bump map (grayscale interpreted as height), not strictly a normal map in this context
+      this.bumpMaterial = new THREE.MeshStandardMaterial({
+        // color can be inherited or set if desired, for now, let it use vertex colors
+        bumpMap: this.normalMap,
+        bumpScale: 2.5, // Adjust for desired bumpiness
+        // Other properties like roughness, metalness will be inherited from original
+        // or can be set here if a completely different look is desired.
+      });
 
-        // Make a noisy, rock-like pattern
-        const x = i / textureSize;
-        const y = j / textureSize;
-        const noise = this.simplex2(x * 5, y * 5) * 0.5 + 0.5;
-        const detail = this.simplex2(x * 20, y * 20) * 0.25 + 0.25;
-
-        const value = Math.floor((noise + detail) * 255);
-
-        data[index] = value; // R
-        data[index + 1] = value; // G
-        data[index + 2] = value; // B
-        data[index + 3] = 255; // A
+      this.originalTerrainMaterial = this.tileGridManager.replaceMaterial(
+        this.bumpMaterial
+      );
+      console.log('BumpMappingExperiment initialized, material replaced.');
+    } catch (error) {
+      console.error('Error initializing BumpMappingExperiment:', error);
+      // Revert to original material if initialization fails
+      if (this.originalTerrainMaterial && this.bumpMaterial) {
+        this.tileGridManager.replaceMaterial(this.originalTerrainMaterial);
       }
+      throw error; // Re-throw to allow App.ts to catch it
     }
-
-    // Create texture from the data
-    this.bumpTexture = new THREE.DataTexture(
-      data,
-      textureSize,
-      textureSize,
-      THREE.RGBAFormat
-    );
-    this.bumpTexture.wrapS = THREE.RepeatWrapping;
-    this.bumpTexture.wrapT = THREE.RepeatWrapping;
-    this.bumpTexture.needsUpdate = true;
-
-    // Create a new material for the terrain tiles
-    this.bumpMaterial = new THREE.MeshStandardMaterial({
-      color: 0x669944,
-      roughness: 0.8,
-      metalness: 0.2,
-      bumpMap: this.bumpTexture,
-      bumpScale: 5.0,
-      displacementMap: this.bumpTexture,
-      displacementScale: 10.0,
-    });
-
-    // Replace the material on all terrain tiles
-    this.originalMaterial = this.tileManager.replaceMaterial(this.bumpMaterial);
   }
 
   update(deltaTime: number): void {
-    // Animation or updates if needed
+    // No specific update logic for this experiment needed in the animation loop yet
   }
 
   dispose(): void {
-    // Restore original material
-    if (this.originalMaterial) {
-      this.tileManager.replaceMaterial(this.originalMaterial);
+    if (this.originalTerrainMaterial) {
+      this.tileGridManager.replaceMaterial(this.originalTerrainMaterial);
+      this.originalTerrainMaterial = null;
+      console.log(
+        'BumpMappingExperiment disposed, original material restored.'
+      );
     }
-
-    // Dispose of resources
-    if (this.bumpTexture) {
-      this.bumpTexture.dispose();
+    if (this.normalMap) {
+      this.normalMap.dispose();
+      this.normalMap = null;
     }
-
     if (this.bumpMaterial) {
       this.bumpMaterial.dispose();
+      this.bumpMaterial = null;
     }
   }
 
