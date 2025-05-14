@@ -191,8 +191,8 @@ export class TileGridManager {
             new THREE.BufferGeometry(), // Empty placeholder, will be set in first update
             this.sharedTerrainMaterial
           ),
-          conceptualGridX: 0,
-          conceptualGridZ: 0,
+          conceptualGridX: -Infinity,
+          conceptualGridZ: -Infinity,
           // markerMesh will be created in recycleTiles
         };
         this.tiles[r][c] = tile;
