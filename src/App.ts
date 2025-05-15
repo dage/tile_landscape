@@ -74,6 +74,7 @@ export class App {
     fadeDurations: number[];
     lifeTimes: number[];
     ages: number[];
+    initialSpawnColors: number[];
   } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -604,6 +605,7 @@ export class App {
     const fadeDurations: number[] = [];
     const lifeTimes: number[] = [];
     const ages: number[] = [];
+    const initialSpawnColors: number[] = [];
 
     // Define colors for our particles
     const colorOptions = [
@@ -652,6 +654,7 @@ export class App {
       fadeDurations.push(0.5 + Math.random() * 1.5); // Fade duration between 0.5 and 2 seconds
       lifeTimes.push(0);
       ages.push(0);
+      initialSpawnColors.push(color);
     }
 
     // Store everything - initially no particles are active
@@ -667,6 +670,7 @@ export class App {
       fadeDurations,
       lifeTimes,
       ages,
+      initialSpawnColors,
     };
   }
 
@@ -864,6 +868,7 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       fadeDurations,
       lifeTimes,
       ages,
+      initialSpawnColors,
     } = this.groundLightParticles;
 
     // Use conceptual camera position in world coordinates
@@ -941,25 +946,17 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
 
       // 4. Color transitions - shift color as the particle ages
       if (particle.material instanceof MeshBasicMaterial) {
-        if (lifePercentage < 0.3) {
-          // Start with the original color, gradually shift to white at midlife
-          const t = lifePercentage / 0.3;
-          const originalColor = new THREE.Color(
-            particle.material.color.getHex()
-          );
-          const midColor = new THREE.Color(0xffffff);
-          originalColor.lerp(midColor, t);
-          particle.material.color.set(originalColor);
-        } else if (lifePercentage < 0.7) {
-          // From midlife to 70%, maintain white/bright color
-          particle.material.color.set(0xffffff);
+        const spawnColorHex = initialSpawnColors[i];
+        const currentParticleMaterial = particle.material as MeshBasicMaterial;
+
+        if (lifePercentage < 0.6) {
+          currentParticleMaterial.color.setHex(spawnColorHex);
         } else {
-          // In final stage, transition to a redder/warmer color
-          const t = (lifePercentage - 0.7) / 0.3;
-          const brightColor = new THREE.Color(0xffffff);
-          const fadeColor = new THREE.Color(0xff3300); // Warm orange/red for fading
-          brightColor.lerp(fadeColor, t);
-          particle.material.color.set(brightColor);
+          const t = (lifePercentage - 0.6) / 0.4;
+          const startColor = new THREE.Color(spawnColorHex);
+          const endFadeColor = new THREE.Color(0xff3300);
+          startColor.lerp(endFadeColor, t);
+          currentParticleMaterial.color.set(startColor);
         }
       }
 
@@ -1037,19 +1034,8 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
 
       // Set initial material properties
       if (particles[index].material instanceof MeshBasicMaterial) {
-        // Random bright color for new particles
-        const colorOptions = [
-          0xff2097, // Bright pink
-          0x20aaff, // Bright blue
-          0xaaff20, // Bright green
-          0xff7700, // Orange
-          0x9900ff, // Purple
-          0x00ffff, // Cyan
-          0xff00ff, // Magenta
-        ];
-        const color =
-          colorOptions[Math.floor(Math.random() * colorOptions.length)];
-        particles[index].material.color.setHex(color);
+        const spawnColorForThisParticle = initialSpawnColors[index];
+        particles[index].material.color.setHex(spawnColorForThisParticle);
         particles[index].material.opacity = 0.9;
       }
 
@@ -1143,6 +1129,14 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       this.groundLightParticles.ages[index] =
         this.groundLightParticles.ages[lastActiveIndex];
       this.groundLightParticles.ages[lastActiveIndex] = tempAge;
+
+      // Swap initial spawn colors
+      const tempInitialColor =
+        this.groundLightParticles.initialSpawnColors[index];
+      this.groundLightParticles.initialSpawnColors[index] =
+        this.groundLightParticles.initialSpawnColors[lastActiveIndex];
+      this.groundLightParticles.initialSpawnColors[lastActiveIndex] =
+        tempInitialColor;
 
       // Decrement active count and hide the now inactive particle
       this.groundLightParticles.activeCount--;
