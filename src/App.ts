@@ -35,6 +35,33 @@ import {
   SphereGeometry,
 } from 'three';
 
+const FENCE_PARTICLE_MAX_SCALE = 0.5; // New max size for fence particles
+const FENCE_PARTICLE_GROW_TIME = 0.5; // seconds
+const FENCE_PARTICLE_SHRINK_TIME = 0.5; // seconds
+const FENCE_PARTICLE_MIN_TRAVEL_TIME = 2.0; // seconds
+const FENCE_PARTICLE_MAX_TRAVEL_TIME = 5.0; // seconds
+// const FENCE_PARTICLE_COLOR = 0xff0000; // Commented out, will use a distinct color for visibility
+const FENCE_PARTICLE_VISIBLE_COLOR = 0xff0000; // Back to Red
+
+interface FenceParticleData {
+  particles: THREE.Mesh[];
+  activeCount: number;
+  spawnTimer: number;
+
+  // Per-particle state
+  states: ('IDLE' | 'GROWING' | 'TRAVELING' | 'SHRINKING')[];
+  animationTimers: number[]; // For grow/shrink
+  targetScales: number[]; // Max scale for this particle (was initialSizes)
+
+  // Travel-specific state
+  travelTargetTileWorldOrigin: THREE.Vector3[]; // Conceptual world origin of the target tile
+  travelPathPoints: THREE.Vector3[][]; // Array of Vector3 for the specific path (local to tile origin)
+  currentSegmentIndices: number[];
+  progressOnSegments: number[]; // 0-1 progress on current segment
+  travelDurations: number[]; // Total time to travel the full path
+  travelAge: number[]; // How long it has been traveling on current path
+}
+
 export class App {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -62,20 +89,7 @@ export class App {
   };
   private currentExperiment: RenderingExperiment = new NoopExperiment();
   private starField: THREE.Points;
-  private groundLightParticles: {
-    particles: Mesh[];
-    velocities: number[];
-    maxHeights: number[];
-    basePositions: Vector3[];
-    normals: Vector3[];
-    activeCount: number;
-    spawnTimer: number;
-    initialSizes: number[];
-    fadeDurations: number[];
-    lifeTimes: number[];
-    ages: number[];
-    initialSpawnColors: number[];
-  } | null = null;
+  private fenceParticles: FenceParticleData | null = null; // Renamed and new structure
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -590,87 +604,62 @@ export class App {
     );
     this.scene.add(this.lights.hemispheric);
 
-    // Create emissive particle lights from ground
-    this.createGroundLightParticles(300); // Create 300 visible spheres
+    this.createFenceParticles(500); // Set max particle count to 500
   }
 
-  private createGroundLightParticles(count: number): void {
-    // Initialize arrays to hold our particles
+  private createFenceParticles(count: number): void {
     const particles: THREE.Mesh[] = [];
-    const velocities: number[] = [];
-    const maxHeights: number[] = [];
-    const basePositions: THREE.Vector3[] = [];
-    const normals: THREE.Vector3[] = [];
-    const initialSizes: number[] = [];
-    const fadeDurations: number[] = [];
-    const lifeTimes: number[] = [];
-    const ages: number[] = [];
-    const initialSpawnColors: number[] = [];
+    const states: FenceParticleData['states'] = [];
+    const animationTimers: number[] = [];
+    const targetScales: number[] = [];
+    const travelTargetTileWorldOrigin: THREE.Vector3[] = [];
+    const travelPathPoints: THREE.Vector3[][] = [];
+    const currentSegmentIndices: number[] = [];
+    const progressOnSegments: number[] = [];
+    const travelDurations: number[] = [];
+    const travelAge: number[] = [];
 
-    // Define colors for our particles
-    const colorOptions = [
-      0xff2097, // Bright pink
-      0x20aaff, // Bright blue
-      0xaaff20, // Bright green
-      0xff7700, // Orange
-      0x9900ff, // Purple
-      0x00ffff, // Cyan
-      0xff00ff, // Magenta
-    ];
+    const sphereGeometry = new THREE.SphereGeometry(1, 8, 8);
 
-    // Create a higher detail sphere geometry for all particles
-    const sphereGeometry = new THREE.SphereGeometry(1, 12, 12);
-
-    // Pre-create particles but don't actually spawn them yet
     for (let i = 0; i < count; i++) {
-      // Create material with random color
-      const color =
-        colorOptions[Math.floor(Math.random() * colorOptions.length)];
       const material = new THREE.MeshBasicMaterial({
-        color: color,
+        color: FENCE_PARTICLE_VISIBLE_COLOR, // Use distinct white color from higher scope
         transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending, // Add additive blending for a glowing effect
+        opacity: 0.9, // Will be controlled by grow/shrink animations
+        blending: THREE.AdditiveBlending,
       });
-
-      // Create mesh but place it below ground to hide it initially
       const sphere = new THREE.Mesh(sphereGeometry, material);
-      sphere.position.y = -1000; // Hide it underground
-
-      // Randomize initial size for variety
-      const size = 1.5 + Math.random() * 2.5; // Random size between 1.5 and 4
-      sphere.scale.set(size, size, size);
-
-      // Add to the scene
+      sphere.scale.set(0, 0, 0); // Start at size 0
+      sphere.visible = false; // Initially not visible
       this.scene.add(sphere);
 
-      // Store the particle data with initial dummy values
       particles.push(sphere);
-      velocities.push(0);
-      maxHeights.push(0);
-      basePositions.push(new THREE.Vector3(0, -1000, 0));
-      normals.push(new THREE.Vector3(0, 1, 0));
-      initialSizes.push(size);
-      fadeDurations.push(0.5 + Math.random() * 1.5); // Fade duration between 0.5 and 2 seconds
-      lifeTimes.push(0);
-      ages.push(0);
-      initialSpawnColors.push(color);
+      states.push('IDLE');
+      animationTimers.push(0);
+      targetScales.push(
+        FENCE_PARTICLE_MAX_SCALE * (0.75 + Math.random() * 0.5)
+      );
+      travelTargetTileWorldOrigin.push(new THREE.Vector3());
+      travelPathPoints.push([]);
+      currentSegmentIndices.push(0);
+      progressOnSegments.push(0);
+      travelDurations.push(0);
+      travelAge.push(0);
     }
 
-    // Store everything - initially no particles are active
-    this.groundLightParticles = {
+    this.fenceParticles = {
       particles,
-      velocities,
-      maxHeights,
-      basePositions,
-      normals,
       activeCount: 0,
       spawnTimer: 0,
-      initialSizes,
-      fadeDurations,
-      lifeTimes,
-      ages,
-      initialSpawnColors,
+      states,
+      animationTimers,
+      targetScales,
+      travelTargetTileWorldOrigin,
+      travelPathPoints,
+      currentSegmentIndices,
+      progressOnSegments,
+      travelDurations,
+      travelAge,
     };
   }
 
@@ -689,8 +678,7 @@ export class App {
     const elapsedTime = this.clock.elapsedTime;
     const previousActualCameraY = this.conceptualCameraPosition.y; // Actual Y from end of previous frame
 
-    // Update ground light particles
-    this.updateGroundLightParticles(deltaTime);
+    this.updateFenceParticles(deltaTime); // Changed from updateGroundLightParticles
 
     // Update camera controls (gets user's current absolute desired height)
     this.controls = this.cameraController.update(deltaTime);
@@ -737,19 +725,46 @@ export class App {
     if (shiftDelta.lengthSq() > 0) {
       this.worldOriginOffset.add(shiftDelta);
 
-      // When the origin shifts, we need to update all particles to maintain their positions
-      // relative to the terrain
-      if (this.groundLightParticles) {
-        const { particles, basePositions } = this.groundLightParticles;
+      if (this.fenceParticles) {
+        const {
+          particles,
+          states,
+          travelTargetTileWorldOrigin,
+          travelPathPoints,
+          currentSegmentIndices,
+          progressOnSegments,
+        } = this.fenceParticles;
+        for (let i = 0; i < this.fenceParticles.activeCount; i++) {
+          if (states[i] !== 'IDLE') {
+            // Recalculate scene position based on its conceptual path and new worldOriginOffset
+            if (travelPathPoints[i] && travelPathPoints[i].length > 0) {
+              const segmentIndex = currentSegmentIndices[i];
+              const progress = progressOnSegments[i];
+              const path = travelPathPoints[i];
 
-        // Update all active particles
-        for (let i = 0; i < this.groundLightParticles.activeCount; i++) {
-          // Adjust the scene position of the particle to compensate for the origin shift
-          // This ensures the particle remains at the same world position
-          particles[i].position.sub(shiftDelta);
+              if (segmentIndex < path.length - 1) {
+                const pStartLocal = path[segmentIndex];
+                const pEndLocal = path[segmentIndex + 1];
+                const currentLocalPos = new THREE.Vector3().lerpVectors(
+                  pStartLocal,
+                  pEndLocal,
+                  progress
+                );
 
-          // Also update the base position (spawn point) to maintain correct height calculation
-          basePositions[i].sub(shiftDelta);
+                // Position is: tile local path point + tile world origin - current world origin offset
+                particles[i].position
+                  .copy(currentLocalPos)
+                  .add(travelTargetTileWorldOrigin[i])
+                  .sub(this.worldOriginOffset);
+              } else if (path.length > 0) {
+                // If on last point
+                particles[i].position
+                  .copy(path[path.length - 1])
+                  .add(travelTargetTileWorldOrigin[i])
+                  .sub(this.worldOriginOffset);
+              }
+            }
+          }
         }
       }
     }
@@ -845,7 +860,7 @@ Fractional Tile Pos: X: ${((camPos.x % TILE_SIZE) / TILE_SIZE).toFixed(
     )}, Z: ${((camPos.z % TILE_SIZE) / TILE_SIZE).toFixed(2)}
 Shift Threshold: ${FLOATING_ORIGIN_SHIFT_THRESHOLD.toFixed(2)}
 
-Active Particles: ${this.groundLightParticles ? this.groundLightParticles.activeCount : 0}/${this.groundLightParticles ? this.groundLightParticles.particles.length : 0}
+Active Fence Particles: ${this.fenceParticles ? this.fenceParticles.activeCount : 0}/${this.fenceParticles ? this.fenceParticles.particles.length : 0}
 
 Controls:
 Speed: ${this.controls.speed.toFixed(2)} (W/S or Mouse Wheel)
@@ -855,297 +870,265 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
     `;
   }
 
-  private updateGroundLightParticles(deltaTime: number): void {
-    if (!this.groundLightParticles) return;
+  private updateFenceParticles(deltaTime: number): void {
+    if (!this.fenceParticles) return;
 
     const {
       particles,
-      velocities,
-      maxHeights,
-      basePositions,
-      normals,
-      initialSizes,
-      fadeDurations,
-      lifeTimes,
-      ages,
-      initialSpawnColors,
-    } = this.groundLightParticles;
+      states,
+      animationTimers,
+      targetScales,
+      travelTargetTileWorldOrigin,
+      travelPathPoints,
+      currentSegmentIndices,
+      progressOnSegments,
+      travelDurations,
+      travelAge,
+    } = this.fenceParticles;
 
-    // Use conceptual camera position in world coordinates
-    const cameraPosition = this.conceptualCameraPosition;
-
-    // Get camera direction to spawn particles in front of camera
-    const lookDirection = new THREE.Vector3(0, 0, -1);
-    lookDirection.applyEuler(
-      new THREE.Euler(0, this.controls.rotationY, 0, 'YXZ')
-    );
-
-    // First, update existing active particles
-    for (let i = 0; i < this.groundLightParticles.activeCount; i++) {
+    // 1. Update existing active particles
+    for (let i = 0; i < this.fenceParticles.activeCount; i++) {
       const particle = particles[i];
-      const velocity = velocities[i];
-      const maxHeight = maxHeights[i];
-      const basePosition = basePositions[i];
-      const normal = normals[i];
-      const initialSize = initialSizes[i];
-      const fadeTime = fadeDurations[i];
+      const currentState = states[i];
+      animationTimers[i] -= deltaTime;
+      travelAge[i] += currentState === 'TRAVELING' ? deltaTime : 0;
 
-      // Update particle age
-      ages[i] += deltaTime;
-      const age = ages[i];
-      const lifeTime = lifeTimes[i];
+      switch (currentState) {
+        case 'GROWING':
+          const growProgress = Math.max(
+            0,
+            1 - animationTimers[i] / FENCE_PARTICLE_GROW_TIME
+          );
+          const currentTargetScale = targetScales[i]; // Use the stored target scale
+          particle.scale.setScalar(currentTargetScale * growProgress);
+          let currentOpacity = 0;
+          if (particle.material instanceof MeshBasicMaterial) {
+            currentOpacity = 0.9 * growProgress;
+            particle.material.opacity = currentOpacity;
+          }
 
-      // Calculate remaining life percentage (0 to 1)
-      const lifePercentage = Math.min(age / lifeTime, 1.0);
+          if (animationTimers[i] <= 0) {
+            states[i] = 'TRAVELING';
+            travelAge[i] = 0;
+            // Ensure full scale and opacity at end of growth
+            particle.scale.setScalar(currentTargetScale);
+            if (particle.material instanceof MeshBasicMaterial)
+              particle.material.opacity = 0.9;
+          }
+          break;
 
-      // Calculate world coordinates for this particle (conceptual position)
-      const worldPos = new THREE.Vector3();
-      worldPos.copy(particle.position);
-      worldPos.add(this.worldOriginOffset);
+        case 'TRAVELING':
+          const travelProgress = Math.min(1, travelAge[i] / travelDurations[i]);
+          const path = travelPathPoints[i];
+          if (path && path.length > 1) {
+            const totalSegments = path.length - 1;
+            const targetPointOnPath = travelProgress * totalSegments; // float representing point along total path
+            currentSegmentIndices[i] = Math.floor(targetPointOnPath);
+            progressOnSegments[i] =
+              targetPointOnPath - currentSegmentIndices[i];
 
-      // Move the particle along its normal vector in world space with slightly curved trajectory
-      // Add a small sideways motion based on age for a more interesting path
-      const sideMotion = Math.sin(age * 1.5) * 0.5;
-      const sideVector = new THREE.Vector3()
-        .crossVectors(normal, new THREE.Vector3(1, 0, 0))
-        .normalize();
+            if (currentSegmentIndices[i] >= totalSegments) {
+              // Reached end of path
+              currentSegmentIndices[i] = totalSegments - 1;
+              progressOnSegments[i] = 1;
+            }
 
-      worldPos.x +=
-        normal.x * velocity * deltaTime + sideVector.x * sideMotion * deltaTime;
-      worldPos.y += normal.y * velocity * deltaTime;
-      worldPos.z +=
-        normal.z * velocity * deltaTime + sideVector.z * sideMotion * deltaTime;
+            const pStartLocal = path[currentSegmentIndices[i]];
+            const pEndLocal = path[currentSegmentIndices[i] + 1];
 
-      // Convert back to scene coordinates for rendering
-      particle.position.copy(worldPos);
-      particle.position.sub(this.worldOriginOffset);
+            if (pStartLocal && pEndLocal) {
+              const currentLocalPos = new THREE.Vector3().lerpVectors(
+                pStartLocal,
+                pEndLocal,
+                progressOnSegments[i]
+              );
+              particle.position
+                .copy(currentLocalPos)
+                .add(travelTargetTileWorldOrigin[i])
+                .sub(this.worldOriginOffset);
+            } else {
+              // Should not happen if path is valid
+              states[i] = 'SHRINKING';
+              animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+            }
+          } else {
+            // Path too short or invalid
+            states[i] = 'SHRINKING';
+            animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+          }
 
-      // Apply visual effects based on lifetime
+          if (travelAge[i] >= travelDurations[i]) {
+            states[i] = 'SHRINKING';
+            animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+          }
+          break;
 
-      // 1. Fade out as the particle reaches end of life
-      if (lifePercentage > 0.6) {
-        // Start fading out at 60% of life
-        const fadePercentage = (lifePercentage - 0.6) / 0.4;
-        if (particle.material instanceof MeshBasicMaterial) {
-          particle.material.opacity = 0.9 * (1 - fadePercentage);
-        }
-      }
+        case 'SHRINKING':
+          const shrinkProgress = Math.max(
+            0,
+            animationTimers[i] / FENCE_PARTICLE_SHRINK_TIME
+          );
+          particle.scale.setScalar(targetScales[i] * shrinkProgress);
+          if (particle.material instanceof MeshBasicMaterial)
+            particle.material.opacity = 0.9 * shrinkProgress;
 
-      // 2. Gradually decrease size
-      const sizeCurve = 1 - Math.pow(lifePercentage, 2); // Non-linear size reduction (faster at the end)
-      const sizeFactor = 0.1 + sizeCurve * 0.9; // Keep at least 10% size until the end
-
-      // 3. Add a pulsating effect
-      const pulseFreq = 3 + Math.sin(age * 2) * 0.5; // Variable pulsation frequency
-      const pulseAmp = 0.1 + lifePercentage * 0.1; // Pulsation increases with age
-      const pulseFactor = 1 + Math.sin(age * pulseFreq) * pulseAmp;
-
-      // Apply the combined size factors
-      const finalSize = initialSize * sizeFactor * pulseFactor;
-      particle.scale.set(finalSize, finalSize, finalSize);
-
-      // 4. Color transitions - shift color as the particle ages
-      if (particle.material instanceof MeshBasicMaterial) {
-        const spawnColorHex = initialSpawnColors[i];
-        const currentParticleMaterial = particle.material as MeshBasicMaterial;
-
-        if (lifePercentage < 0.6) {
-          currentParticleMaterial.color.setHex(spawnColorHex);
-        } else {
-          const t = (lifePercentage - 0.6) / 0.4;
-          const startColor = new THREE.Color(spawnColorHex);
-          const endFadeColor = new THREE.Color(0xff3300);
-          startColor.lerp(endFadeColor, t);
-          currentParticleMaterial.color.set(startColor);
-        }
-      }
-
-      // Check if particle has completed its lifetime
-      if (age >= lifeTime || sizeFactor < 0.15) {
-        // Reset this particle
-        this.resetParticle(i);
-        // Adjust index since resetParticle might have swapped this particle
-        i--;
+          if (animationTimers[i] <= 0) {
+            this.resetFenceParticle(i);
+            i--; // Adjust index due to potential swap in resetParticle
+          }
+          break;
       }
     }
 
-    // Try to spawn new particles
-    this.groundLightParticles.spawnTimer += deltaTime;
-
-    // Only try spawning if we have inactive particles and enough time has passed
-    const spawnProbability = 0.9; // 90% chance per second
-    const spawnInterval = 1.0 / 15; // At most 15 particles per second
+    // 2. Try to spawn new particles
+    this.fenceParticles.spawnTimer += deltaTime;
+    const spawnInterval = 1.0 / 25; // Spawn checks up to 25 times per second (5x original 5/sec)
+    const fixedSpawnAttemptProbability = 0.5;
 
     if (
-      this.groundLightParticles.spawnTimer >= spawnInterval &&
-      this.groundLightParticles.activeCount < particles.length &&
-      Math.random() < spawnProbability * deltaTime
+      this.fenceParticles.spawnTimer >= spawnInterval &&
+      this.fenceParticles.activeCount < particles.length &&
+      Math.random() < fixedSpawnAttemptProbability // Use fixed attempt probability
     ) {
-      // Reset spawn timer
-      this.groundLightParticles.spawnTimer = 0;
+      this.fenceParticles.spawnTimer = 0;
 
-      // Activate next particle
-      const index = this.groundLightParticles.activeCount;
-      this.groundLightParticles.activeCount++;
+      // --- View Frustum Culling for Spawn Locations ---
+      const frustum = new THREE.Frustum();
+      const cameraViewProjectionMatrix = new THREE.Matrix4();
+      this.camera.updateMatrixWorld(); // Ensure camera matrices are up-to-date
+      cameraViewProjectionMatrix.multiplyMatrices(
+        this.camera.projectionMatrix,
+        this.camera.matrixWorldInverse
+      );
+      frustum.setFromProjectionMatrix(cameraViewProjectionMatrix);
+      // --- End Frustum Setup ---
 
-      // Position in front of the camera
-      const distance = 100 + Math.random() * 100; // Between 100-200 units in front
-      const sideways = (Math.random() - 0.5) * 60; // Up to 30 units to either side
+      const allActiveTilesWithPaths =
+        this.tileGridManager.getActiveTileFenceData();
+      const visibleTilesWithPaths = allActiveTilesWithPaths.filter(
+        (tileData) => {
+          // Guard 1: Ensure paths object itself exists
+          if (!tileData.paths) {
+            return false;
+          }
+          // Guard 2: Ensure the paths arrays are valid for spawning (at least 2 points for a segment)
+          if (
+            tileData.paths.positiveX.length < 2 &&
+            tileData.paths.positiveZ.length < 2
+          ) {
+            return false;
+          }
 
-      // Calculate spawn position in front of camera
-      const spawnPos = new THREE.Vector3();
-      spawnPos.copy(cameraPosition);
+          const tileCenterWorld = new THREE.Vector3(
+            tileData.tileWorldOrigin.x + TILE_SIZE / 2,
+            tileData.tileWorldOrigin.y,
+            tileData.tileWorldOrigin.z + TILE_SIZE / 2
+          );
+          const tileCenterInSceneCoords = tileCenterWorld
+            .clone()
+            .sub(this.worldOriginOffset);
+          return frustum.containsPoint(tileCenterInSceneCoords);
+        }
+      );
 
-      // Move forward in the camera's looking direction
-      spawnPos.x += lookDirection.x * distance;
-      spawnPos.z += lookDirection.z * distance;
-
-      // Add sideways offset
-      const rightVector = new THREE.Vector3()
-        .crossVectors(lookDirection, new THREE.Vector3(0, 1, 0))
-        .normalize();
-      spawnPos.x += rightVector.x * sideways;
-      spawnPos.z += rightVector.z * sideways;
-
-      // Get terrain height and normal at this position
-      const terrainHeight = getHeight(spawnPos.x, spawnPos.z);
-      spawnPos.y = terrainHeight;
-
-      // Calculate terrain normal
-      const sampleDistance = 1.0;
-      const hL = getHeight(spawnPos.x - sampleDistance, spawnPos.z);
-      const hR = getHeight(spawnPos.x + sampleDistance, spawnPos.z);
-      const hU = getHeight(spawnPos.x, spawnPos.z - sampleDistance);
-      const hD = getHeight(spawnPos.x, spawnPos.z + sampleDistance);
-
-      // Calculate normal vector from height differences
-      const newNormal = new THREE.Vector3(
-        (hL - hR) / (2 * sampleDistance),
-        1.0, // Y component is always up somewhat
-        (hU - hD) / (2 * sampleDistance)
-      ).normalize();
-
-      // Reset particle age
-      ages[index] = 0;
-
-      // Randomize particle lifetime - how long it will live
-      const particleLifetime = 4 + Math.random() * 6; // 4-10 seconds lifespan
-      lifeTimes[index] = particleLifetime;
-
-      // Set initial material properties
-      if (particles[index].material instanceof MeshBasicMaterial) {
-        const spawnColorForThisParticle = initialSpawnColors[index];
-        particles[index].material.color.setHex(spawnColorForThisParticle);
-        particles[index].material.opacity = 0.9;
+      if (visibleTilesWithPaths.length === 0) {
+        // console.log("No VISIBLE tiles with paths to spawn particles.");
+        return;
       }
 
-      // Update particle properties
-      basePositions[index].copy(spawnPos);
-      normals[index].copy(newNormal);
+      const tileData =
+        visibleTilesWithPaths[
+          Math.floor(Math.random() * visibleTilesWithPaths.length)
+        ];
 
-      // Slower velocities for longer visibility and more interesting effects
-      velocities[index] = 6 + Math.random() * 14;
+      // Explicit check for tileData.paths to satisfy TypeScript and catch unexpected issues
+      if (!tileData.paths) {
+        console.error(
+          'Critical error: Filtered tileData is missing paths object.',
+          tileData
+        );
+        return; // Should not happen if filter is correct
+      }
 
-      // Set a max height based on velocity and lifetime to ensure proper lifetime
-      const riseHeight = 40 + Math.random() * 60;
-      maxHeights[index] = terrainHeight + riseHeight;
+      const isXEdge = Math.random() < 0.5;
+      // Now tileData.paths is guaranteed to be defined here by the check above
+      const path = isXEdge
+        ? tileData.paths.positiveX
+        : tileData.paths.positiveZ;
 
-      // Set initial scale based on the stored initial size
-      const initialSize = initialSizes[index];
-      particles[index].scale.set(initialSize, initialSize, initialSize);
+      if (path && path.length > 1) {
+        const index = this.fenceParticles.activeCount;
+        this.fenceParticles.activeCount++;
 
-      // Position the particle in scene coordinates
-      particles[index].position.copy(spawnPos);
-      particles[index].position.sub(this.worldOriginOffset);
+        states[index] = 'GROWING';
+        animationTimers[index] = FENCE_PARTICLE_GROW_TIME;
+        particles[index].scale.setScalar(0);
+        particles[index].visible = true;
+
+        // Ensure color is set correctly; opacity will be handled by GROWING state.
+        if (particles[index].material instanceof MeshBasicMaterial) {
+          (particles[index].material as MeshBasicMaterial).color.setHex(
+            FENCE_PARTICLE_VISIBLE_COLOR
+          );
+          // Opacity starts at material default (0.9) but GROWING state will immediately multiply by growProgress (near 0)
+        }
+
+        travelTargetTileWorldOrigin[index].copy(tileData.tileWorldOrigin);
+        travelPathPoints[index] = path;
+        currentSegmentIndices[index] = 0;
+        progressOnSegments[index] = 0;
+        travelDurations[index] =
+          FENCE_PARTICLE_MIN_TRAVEL_TIME +
+          Math.random() *
+            (FENCE_PARTICLE_MAX_TRAVEL_TIME - FENCE_PARTICLE_MIN_TRAVEL_TIME);
+        travelAge[index] = 0;
+
+        const initialLocalPos = path[0];
+        particles[index].position
+          .copy(initialLocalPos)
+          .add(travelTargetTileWorldOrigin[index])
+          .sub(this.worldOriginOffset);
+      }
     }
   }
 
-  private resetParticle(index: number): void {
-    if (!this.groundLightParticles) return;
+  private resetFenceParticle(index: number): void {
+    if (!this.fenceParticles) return;
+    const fp = this.fenceParticles;
 
-    // Get the last active particle
-    const lastActiveIndex = this.groundLightParticles.activeCount - 1;
+    const lastActiveIndex = fp.activeCount - 1;
+    if (index < 0 || index > lastActiveIndex) return; // Should not happen
+
+    fp.particles[index].visible = false;
+    fp.particles[index].scale.setScalar(0);
+    fp.states[index] = 'IDLE';
+    fp.travelPathPoints[index] = []; // Clear path reference
 
     if (index === lastActiveIndex) {
-      // If it's already the last active particle, just decrement the count
-      this.groundLightParticles.activeCount--;
-      this.groundLightParticles.particles[index].position.y = -1000; // Hide it
-    } else if (lastActiveIndex > 0) {
-      // Swap with the last active particle for efficiency
-      // This way we keep all active particles at the beginning of the array
+      fp.activeCount--;
+    } else {
+      // Swap with the last active particle
+      const propsToSwap: (keyof FenceParticleData)[] = [
+        'particles',
+        'states',
+        'animationTimers',
+        'targetScales',
+        'travelTargetTileWorldOrigin',
+        'travelPathPoints',
+        'currentSegmentIndices',
+        'progressOnSegments',
+        'travelDurations',
+        'travelAge',
+      ];
 
-      // Swap particle objects
-      const temp = this.groundLightParticles.particles[index];
-      this.groundLightParticles.particles[index] =
-        this.groundLightParticles.particles[lastActiveIndex];
-      this.groundLightParticles.particles[lastActiveIndex] = temp;
-
-      // Swap velocities
-      const tempVel = this.groundLightParticles.velocities[index];
-      this.groundLightParticles.velocities[index] =
-        this.groundLightParticles.velocities[lastActiveIndex];
-      this.groundLightParticles.velocities[lastActiveIndex] = tempVel;
-
-      // Swap max heights
-      const tempMax = this.groundLightParticles.maxHeights[index];
-      this.groundLightParticles.maxHeights[index] =
-        this.groundLightParticles.maxHeights[lastActiveIndex];
-      this.groundLightParticles.maxHeights[lastActiveIndex] = tempMax;
-
-      // Swap base positions
-      const tempBase = this.groundLightParticles.basePositions[index].clone();
-      this.groundLightParticles.basePositions[index].copy(
-        this.groundLightParticles.basePositions[lastActiveIndex]
-      );
-      this.groundLightParticles.basePositions[lastActiveIndex].copy(tempBase);
-
-      // Swap normals
-      const tempNormal = this.groundLightParticles.normals[index].clone();
-      this.groundLightParticles.normals[index].copy(
-        this.groundLightParticles.normals[lastActiveIndex]
-      );
-      this.groundLightParticles.normals[lastActiveIndex].copy(tempNormal);
-
-      // Swap initial sizes
-      const tempSize = this.groundLightParticles.initialSizes[index];
-      this.groundLightParticles.initialSizes[index] =
-        this.groundLightParticles.initialSizes[lastActiveIndex];
-      this.groundLightParticles.initialSizes[lastActiveIndex] = tempSize;
-
-      // Swap fade durations
-      const tempFade = this.groundLightParticles.fadeDurations[index];
-      this.groundLightParticles.fadeDurations[index] =
-        this.groundLightParticles.fadeDurations[lastActiveIndex];
-      this.groundLightParticles.fadeDurations[lastActiveIndex] = tempFade;
-
-      // Swap lifetimes
-      const tempLife = this.groundLightParticles.lifeTimes[index];
-      this.groundLightParticles.lifeTimes[index] =
-        this.groundLightParticles.lifeTimes[lastActiveIndex];
-      this.groundLightParticles.lifeTimes[lastActiveIndex] = tempLife;
-
-      // Swap ages
-      const tempAge = this.groundLightParticles.ages[index];
-      this.groundLightParticles.ages[index] =
-        this.groundLightParticles.ages[lastActiveIndex];
-      this.groundLightParticles.ages[lastActiveIndex] = tempAge;
-
-      // Swap initial spawn colors
-      const tempInitialColor =
-        this.groundLightParticles.initialSpawnColors[index];
-      this.groundLightParticles.initialSpawnColors[index] =
-        this.groundLightParticles.initialSpawnColors[lastActiveIndex];
-      this.groundLightParticles.initialSpawnColors[lastActiveIndex] =
-        tempInitialColor;
-
-      // Decrement active count and hide the now inactive particle
-      this.groundLightParticles.activeCount--;
-      this.groundLightParticles.particles[lastActiveIndex].position.y = -1000; // Hide it
+      for (const prop of propsToSwap) {
+        const p = prop as any;
+        const temp = (fp as any)[p][index];
+        (fp as any)[p][index] = (fp as any)[p][lastActiveIndex];
+        (fp as any)[p][lastActiveIndex] = temp;
+      }
+      fp.activeCount--;
     }
-  }
-
-  private updateRGBLights(time: number): void {
-    // This method is no longer used since we replaced it with updateGroundLightParticles
   }
 
   public dispose(): void {
@@ -1153,15 +1136,16 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
     this.tileGridManager.dispose();
     this.cameraController.dispose();
 
-    // Clean up ground light particles
-    if (this.groundLightParticles) {
-      this.groundLightParticles.particles.forEach((particle) => {
+    if (this.fenceParticles) {
+      this.fenceParticles.particles.forEach((particle) => {
         this.scene.remove(particle);
         particle.geometry.dispose();
         if (particle.material instanceof MeshBasicMaterial) {
           particle.material.dispose();
         }
       });
+      // Nullify to prevent further use
+      this.fenceParticles = null;
     }
 
     this.renderer.dispose();

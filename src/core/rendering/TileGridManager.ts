@@ -12,6 +12,10 @@ interface TerrainTile {
   conceptualGridX: number;
   conceptualGridZ: number;
   fenceGroup?: THREE.Group;
+  fenceEdgePaths?: {
+    positiveX: THREE.Vector3[];
+    positiveZ: THREE.Vector3[];
+  };
 }
 
 const FENCE_HEIGHT = 5.0;
@@ -268,7 +272,6 @@ export class TileGridManager {
       this.scene.add(tile.fenceGroup);
     }
 
-    // Clear previous fence/wall geometry
     tile.fenceGroup.children.forEach((child) => {
       if (child instanceof THREE.Mesh) {
         if (child.geometry) {
@@ -277,6 +280,7 @@ export class TileGridManager {
       }
     });
     tile.fenceGroup.children = [];
+    tile.fenceEdgePaths = { positiveX: [], positiveZ: [] }; // Initialize paths
 
     const bandVertices: number[] = [];
     const wallVertices: number[] = [];
@@ -331,11 +335,15 @@ export class TileGridManager {
     };
 
     // Process edges
-    const edges = [{ isXEdge: true }, { isXEdge: false }]; // Edge 1 (+X), Edge 2 (+Z)
+    const edges = [
+      { isXEdge: true, pathStore: tile.fenceEdgePaths.positiveX },
+      { isXEdge: false, pathStore: tile.fenceEdgePaths.positiveZ },
+    ];
 
     for (const edge of edges) {
       const postBases: THREE.Vector3[] = [];
-      const postTops: THREE.Vector3[] = [];
+      const postTops: THREE.Vector3[] = []; // These are the points particles will follow (in local tile space)
+      edge.pathStore.length = 0; // Clear previous path points for this edge
 
       for (let s = 0; s <= TILE_SUBDIVISIONS; s++) {
         let x_local_coord: number;
@@ -364,6 +372,7 @@ export class TileGridManager {
 
         postBases.push(postBase);
         postTops.push(postTop);
+        edge.pathStore.push(postTop.clone()); // Store a clone of the postTop for the particle path
       }
 
       // Add panels for Band and Wall
@@ -501,5 +510,39 @@ export class TileGridManager {
     if (this.wallMaterial) {
       this.wallMaterial.dispose();
     }
+  }
+
+  // New public method to get all active tiles with their fence paths
+  public getActiveTileFenceData(): Array<{
+    conceptualGridX: number;
+    conceptualGridZ: number;
+    tileWorldOrigin: THREE.Vector3; // Added for convenience for particle system
+    paths:
+      | {
+          positiveX: THREE.Vector3[]; // Paths are in local tile coordinates
+          positiveZ: THREE.Vector3[];
+        }
+      | undefined;
+  }> {
+    const activeTilesData = [];
+    for (let r = 0; r < GRID_DIMENSION; r++) {
+      for (let c = 0; c < GRID_DIMENSION; c++) {
+        const tile = this.tiles[r]?.[c];
+        // A tile is active if its conceptualGridX is not -Infinity (initial value)
+        if (tile && tile.conceptualGridX !== -Infinity && tile.fenceEdgePaths) {
+          activeTilesData.push({
+            conceptualGridX: tile.conceptualGridX,
+            conceptualGridZ: tile.conceptualGridZ,
+            tileWorldOrigin: new THREE.Vector3( // Calculate and provide tile world origin
+              tile.conceptualGridX * TILE_SIZE,
+              0, // Assuming Y is handled by getHeight for particles later
+              tile.conceptualGridZ * TILE_SIZE
+            ),
+            paths: tile.fenceEdgePaths,
+          });
+        }
+      }
+    }
+    return activeTilesData;
   }
 }
