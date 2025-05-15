@@ -1,3 +1,4 @@
+// src/core/rendering/TileGridManager.ts
 import * as THREE from 'three';
 import { TILE_SIZE, GRID_DIMENSION } from '@/core/constants';
 import {
@@ -10,12 +11,18 @@ interface TerrainTile {
   mesh: THREE.Mesh;
   conceptualGridX: number;
   conceptualGridZ: number;
+  fenceGroup?: THREE.Group;
 }
+
+const FENCE_HEIGHT = 10.0;
+const FENCE_COLOR = 0x888888;
+const TILE_SUBDIVISIONS = 32;
 
 export class TileGridManager {
   private scene: THREE.Scene;
   private tiles: TerrainTile[][] = [];
   private sharedTerrainMaterial: THREE.Material;
+  private fenceMaterial: THREE.LineBasicMaterial;
 
   private lastCameraGridX: number = -Infinity;
   private lastCameraGridZ: number = -Infinity;
@@ -34,6 +41,10 @@ export class TileGridManager {
       flatShading: false,
       side: THREE.FrontSide,
       vertexColors: true,
+    });
+
+    this.fenceMaterial = new THREE.LineBasicMaterial({
+      color: FENCE_COLOR,
     });
 
     this.initGrid();
@@ -181,11 +192,15 @@ export class TileGridManager {
             new THREE.BufferGeometry(), // Empty placeholder, will be set in first update
             this.sharedTerrainMaterial
           ),
+          fenceGroup: new THREE.Group(),
           conceptualGridX: -Infinity,
           conceptualGridZ: -Infinity,
         };
         this.tiles[r][c] = tile;
         this.scene.add(tile.mesh);
+        if (tile.fenceGroup) {
+          this.scene.add(tile.fenceGroup);
+        }
       }
     }
   }
@@ -216,10 +231,109 @@ export class TileGridManager {
 
         tile.mesh.position.set(
           conceptualTileWorldX - worldOriginOffset.x,
-          0 - worldOriginOffset.y, // Assuming terrain base is at y=0 conceptually
+          0 - worldOriginOffset.y, // Assuming terrain base is at y=0 conceptually before height displacement
           conceptualTileWorldZ - worldOriginOffset.z
         );
+        if (tile.fenceGroup) {
+          tile.fenceGroup.position.set(
+            conceptualTileWorldX - worldOriginOffset.x,
+            -worldOriginOffset.y, // Fence group is also relative to tile's conceptual origin (0,0,0)
+            conceptualTileWorldZ - worldOriginOffset.z
+          );
+        }
       }
+    }
+  }
+
+  private createOrUpdateTileFence(tile: TerrainTile): void {
+    if (!tile.fenceGroup) {
+      tile.fenceGroup = new THREE.Group();
+      this.scene.add(tile.fenceGroup);
+    }
+
+    // Clear previous fence geometry
+    tile.fenceGroup.children.forEach((child) => {
+      if (child instanceof THREE.LineSegments) {
+        child.geometry.dispose();
+      }
+    });
+    tile.fenceGroup.children = [];
+
+    const fencePoints: THREE.Vector3[] = [];
+    const tempNormal = new THREE.Vector3();
+
+    const tileWorldOriginX = tile.conceptualGridX * TILE_SIZE;
+    const tileWorldOriginZ = tile.conceptualGridZ * TILE_SIZE;
+
+    // Edge 1: Positive X edge (local x = TILE_SIZE / 2)
+    // Local z varies from TILE_SIZE / 2 down to -TILE_SIZE / 2
+    const postTopsEdge1: THREE.Vector3[] = [];
+    for (let s = 0; s <= TILE_SUBDIVISIONS; s++) {
+      const x_local = TILE_SIZE / 2;
+      // y_orig_s ranges from -TILE_SIZE / 2 to +TILE_SIZE / 2
+      // z_local_s = -y_orig_s, so it ranges from +TILE_SIZE / 2 to -TILE_SIZE / 2
+      const z_local_s = TILE_SIZE / 2 - s * (TILE_SIZE / TILE_SUBDIVISIONS);
+
+      const conceptualWorldX = x_local + tileWorldOriginX;
+      const conceptualWorldZ = z_local_s + tileWorldOriginZ;
+
+      const baseY = getHeight(conceptualWorldX, conceptualWorldZ);
+      getSurfaceNormal(conceptualWorldX, conceptualWorldZ, tempNormal);
+
+      const postBase = new THREE.Vector3(x_local, baseY, z_local_s);
+      const postTop = postBase
+        .clone()
+        .add(tempNormal.clone().multiplyScalar(FENCE_HEIGHT));
+
+      fencePoints.push(postBase);
+      fencePoints.push(postTop);
+      postTopsEdge1.push(postTop);
+    }
+
+    // Add top wire for Edge 1
+    for (let i = 0; i < postTopsEdge1.length - 1; i++) {
+      fencePoints.push(postTopsEdge1[i]);
+      fencePoints.push(postTopsEdge1[i + 1]);
+    }
+
+    // Edge 2: Positive Z edge (local z = TILE_SIZE / 2)
+    // Local x varies from -TILE_SIZE / 2 to TILE_SIZE / 2
+    const postTopsEdge2: THREE.Vector3[] = [];
+    for (let s = 0; s <= TILE_SUBDIVISIONS; s++) {
+      const z_local = TILE_SIZE / 2;
+      const x_local_s = -TILE_SIZE / 2 + s * (TILE_SIZE / TILE_SUBDIVISIONS);
+
+      const conceptualWorldX = x_local_s + tileWorldOriginX;
+      const conceptualWorldZ = z_local + tileWorldOriginZ;
+
+      const baseY = getHeight(conceptualWorldX, conceptualWorldZ);
+      getSurfaceNormal(conceptualWorldX, conceptualWorldZ, tempNormal);
+
+      const postBase = new THREE.Vector3(x_local_s, baseY, z_local);
+      const postTop = postBase
+        .clone()
+        .add(tempNormal.clone().multiplyScalar(FENCE_HEIGHT));
+
+      fencePoints.push(postBase);
+      fencePoints.push(postTop);
+      postTopsEdge2.push(postTop);
+    }
+
+    // Add top wire for Edge 2
+    for (let i = 0; i < postTopsEdge2.length - 1; i++) {
+      fencePoints.push(postTopsEdge2[i]);
+      fencePoints.push(postTopsEdge2[i + 1]);
+    }
+
+    if (fencePoints.length > 0) {
+      const fenceGeometry = new THREE.BufferGeometry().setFromPoints(
+        fencePoints
+      );
+      const fenceLines = new THREE.LineSegments(
+        fenceGeometry,
+        this.fenceMaterial
+      );
+      tile.fenceGroup.add(fenceLines);
     }
   }
 
@@ -248,12 +362,13 @@ export class TileGridManager {
           if (tile.mesh.geometry) {
             tile.mesh.geometry.dispose();
           }
-
-          // Create a new geometry for this tile at its new position
+          // Regenerate terrain geometry for the new position
           tile.mesh.geometry = this.createTerrainGeometry(
             targetConceptualGridX,
             targetConceptualGridZ
           );
+          // Create/update fence for the new geometry
+          this.createOrUpdateTileFence(tile);
         }
       }
     }
@@ -293,11 +408,22 @@ export class TileGridManager {
         if (tile.mesh.geometry) {
           tile.mesh.geometry.dispose();
         }
+        if (tile.fenceGroup) {
+          tile.fenceGroup.children.forEach((child) => {
+            if (child instanceof THREE.LineSegments) {
+              child.geometry.dispose();
+            }
+          });
+          this.scene.remove(tile.fenceGroup);
+        }
       })
     );
 
     if (this.sharedTerrainMaterial instanceof THREE.Material) {
       this.sharedTerrainMaterial.dispose();
+    }
+    if (this.fenceMaterial) {
+      this.fenceMaterial.dispose();
     }
   }
 }
