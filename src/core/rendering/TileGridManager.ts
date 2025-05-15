@@ -14,15 +14,22 @@ interface TerrainTile {
   fenceGroup?: THREE.Group;
 }
 
-const FENCE_HEIGHT = 10.0;
-const FENCE_COLOR = 0x888888;
+const FENCE_HEIGHT = 5.0;
+const FENCE_COLOR = 0xff0000;
+const FENCE_OPACITY = 0.5;
+const FENCE_PANEL_VERTICAL_THICKNESS = 1.0;
+
+const WALL_COLOR = 0xff8888;
+const WALL_OPACITY = 0.3;
+
 const TILE_SUBDIVISIONS = 32;
 
 export class TileGridManager {
   private scene: THREE.Scene;
   private tiles: TerrainTile[][] = [];
   private sharedTerrainMaterial: THREE.Material;
-  private fenceMaterial: THREE.LineBasicMaterial;
+  private fenceMaterial: THREE.MeshBasicMaterial;
+  private wallMaterial: THREE.MeshBasicMaterial;
 
   private lastCameraGridX: number = -Infinity;
   private lastCameraGridZ: number = -Infinity;
@@ -43,8 +50,18 @@ export class TileGridManager {
       vertexColors: true,
     });
 
-    this.fenceMaterial = new THREE.LineBasicMaterial({
+    this.fenceMaterial = new THREE.MeshBasicMaterial({
       color: FENCE_COLOR,
+      transparent: true,
+      opacity: FENCE_OPACITY,
+      side: THREE.DoubleSide,
+    });
+
+    this.wallMaterial = new THREE.MeshBasicMaterial({
+      color: WALL_COLOR,
+      transparent: true,
+      opacity: WALL_OPACITY,
+      side: THREE.DoubleSide,
     });
 
     this.initGrid();
@@ -251,89 +268,143 @@ export class TileGridManager {
       this.scene.add(tile.fenceGroup);
     }
 
-    // Clear previous fence geometry
+    // Clear previous fence/wall geometry
     tile.fenceGroup.children.forEach((child) => {
-      if (child instanceof THREE.LineSegments) {
-        child.geometry.dispose();
+      if (child instanceof THREE.Mesh) {
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
       }
     });
     tile.fenceGroup.children = [];
 
-    const fencePoints: THREE.Vector3[] = [];
+    const bandVertices: number[] = [];
+    const wallVertices: number[] = [];
     const tempNormal = new THREE.Vector3();
 
     const tileWorldOriginX = tile.conceptualGridX * TILE_SIZE;
     const tileWorldOriginZ = tile.conceptualGridZ * TILE_SIZE;
 
-    // Edge 1: Positive X edge (local x = TILE_SIZE / 2)
-    // Local z varies from TILE_SIZE / 2 down to -TILE_SIZE / 2
-    const postTopsEdge1: THREE.Vector3[] = [];
-    for (let s = 0; s <= TILE_SUBDIVISIONS; s++) {
-      const x_local = TILE_SIZE / 2;
-      // y_orig_s ranges from -TILE_SIZE / 2 to +TILE_SIZE / 2
-      // z_local_s = -y_orig_s, so it ranges from +TILE_SIZE / 2 to -TILE_SIZE / 2
-      const z_local_s = TILE_SIZE / 2 - s * (TILE_SIZE / TILE_SUBDIVISIONS);
+    const halfBandThicknessVec = new THREE.Vector3(
+      0,
+      FENCE_PANEL_VERTICAL_THICKNESS / 2,
+      0
+    );
 
-      const conceptualWorldX = x_local + tileWorldOriginX;
-      const conceptualWorldZ = z_local_s + tileWorldOriginZ;
+    const addBandPanelSegment = (
+      p1: THREE.Vector3,
+      p2: THREE.Vector3,
+      targetVerticesArray: number[]
+    ) => {
+      const v1_bottom = p1.clone().sub(halfBandThicknessVec);
+      const v1_top = p1.clone().add(halfBandThicknessVec);
+      const v2_bottom = p2.clone().sub(halfBandThicknessVec);
+      const v2_top = p2.clone().add(halfBandThicknessVec);
 
-      const baseY = getHeight(conceptualWorldX, conceptualWorldZ);
-      getSurfaceNormal(conceptualWorldX, conceptualWorldZ, tempNormal);
+      // Triangle 1: v1_bottom, v2_bottom, v2_top
+      targetVerticesArray.push(v1_bottom.x, v1_bottom.y, v1_bottom.z);
+      targetVerticesArray.push(v2_bottom.x, v2_bottom.y, v2_bottom.z);
+      targetVerticesArray.push(v2_top.x, v2_top.y, v2_top.z);
 
-      const postBase = new THREE.Vector3(x_local, baseY, z_local_s);
-      const postTop = postBase
-        .clone()
-        .add(tempNormal.clone().multiplyScalar(FENCE_HEIGHT));
+      // Triangle 2: v1_bottom, v2_top, v1_top
+      targetVerticesArray.push(v1_bottom.x, v1_bottom.y, v1_bottom.z);
+      targetVerticesArray.push(v2_top.x, v2_top.y, v2_top.z);
+      targetVerticesArray.push(v1_top.x, v1_top.y, v1_top.z);
+    };
 
-      fencePoints.push(postBase);
-      fencePoints.push(postTop);
-      postTopsEdge1.push(postTop);
+    const addWallPanelSegment = (
+      groundP1: THREE.Vector3,
+      groundP2: THREE.Vector3,
+      bandBottomP1: THREE.Vector3,
+      bandBottomP2: THREE.Vector3,
+      targetVerticesArray: number[]
+    ) => {
+      // Triangle 1: groundP1, groundP2, bandBottomP2
+      targetVerticesArray.push(groundP1.x, groundP1.y, groundP1.z);
+      targetVerticesArray.push(groundP2.x, groundP2.y, groundP2.z);
+      targetVerticesArray.push(bandBottomP2.x, bandBottomP2.y, bandBottomP2.z);
+
+      // Triangle 2: groundP1, bandBottomP2, bandBottomP1
+      targetVerticesArray.push(groundP1.x, groundP1.y, groundP1.z);
+      targetVerticesArray.push(bandBottomP2.x, bandBottomP2.y, bandBottomP2.z);
+      targetVerticesArray.push(bandBottomP1.x, bandBottomP1.y, bandBottomP1.z);
+    };
+
+    // Process edges
+    const edges = [{ isXEdge: true }, { isXEdge: false }]; // Edge 1 (+X), Edge 2 (+Z)
+
+    for (const edge of edges) {
+      const postBases: THREE.Vector3[] = [];
+      const postTops: THREE.Vector3[] = [];
+
+      for (let s = 0; s <= TILE_SUBDIVISIONS; s++) {
+        let x_local_coord: number;
+        let z_local_coord: number;
+
+        if (edge.isXEdge) {
+          // Positive X edge
+          x_local_coord = TILE_SIZE / 2;
+          z_local_coord = TILE_SIZE / 2 - s * (TILE_SIZE / TILE_SUBDIVISIONS);
+        } else {
+          // Positive Z edge
+          x_local_coord = -TILE_SIZE / 2 + s * (TILE_SIZE / TILE_SUBDIVISIONS);
+          z_local_coord = TILE_SIZE / 2;
+        }
+
+        const conceptualWorldX = x_local_coord + tileWorldOriginX;
+        const conceptualWorldZ = z_local_coord + tileWorldOriginZ;
+
+        const baseY = getHeight(conceptualWorldX, conceptualWorldZ);
+        getSurfaceNormal(conceptualWorldX, conceptualWorldZ, tempNormal);
+
+        const postBase = new THREE.Vector3(x_local_coord, baseY, z_local_coord);
+        const postTop = postBase
+          .clone()
+          .add(tempNormal.clone().multiplyScalar(FENCE_HEIGHT));
+
+        postBases.push(postBase);
+        postTops.push(postTop);
+      }
+
+      // Add panels for Band and Wall
+      for (let i = 0; i < TILE_SUBDIVISIONS; i++) {
+        // Iterate TILE_SUBDIVISIONS times for segments
+        const pTopA = postTops[i];
+        const pTopB = postTops[i + 1];
+        addBandPanelSegment(pTopA, pTopB, bandVertices);
+
+        const pBaseA = postBases[i];
+        const pBaseB = postBases[i + 1];
+        const bandBottomA = pTopA.clone().sub(halfBandThicknessVec);
+        const bandBottomB = pTopB.clone().sub(halfBandThicknessVec);
+        addWallPanelSegment(
+          pBaseA,
+          pBaseB,
+          bandBottomA,
+          bandBottomB,
+          wallVertices
+        );
+      }
     }
 
-    // Add top wire for Edge 1
-    for (let i = 0; i < postTopsEdge1.length - 1; i++) {
-      fencePoints.push(postTopsEdge1[i]);
-      fencePoints.push(postTopsEdge1[i + 1]);
-    }
-
-    // Edge 2: Positive Z edge (local z = TILE_SIZE / 2)
-    // Local x varies from -TILE_SIZE / 2 to TILE_SIZE / 2
-    const postTopsEdge2: THREE.Vector3[] = [];
-    for (let s = 0; s <= TILE_SUBDIVISIONS; s++) {
-      const z_local = TILE_SIZE / 2;
-      const x_local_s = -TILE_SIZE / 2 + s * (TILE_SIZE / TILE_SUBDIVISIONS);
-
-      const conceptualWorldX = x_local_s + tileWorldOriginX;
-      const conceptualWorldZ = z_local + tileWorldOriginZ;
-
-      const baseY = getHeight(conceptualWorldX, conceptualWorldZ);
-      getSurfaceNormal(conceptualWorldX, conceptualWorldZ, tempNormal);
-
-      const postBase = new THREE.Vector3(x_local_s, baseY, z_local);
-      const postTop = postBase
-        .clone()
-        .add(tempNormal.clone().multiplyScalar(FENCE_HEIGHT));
-
-      fencePoints.push(postBase);
-      fencePoints.push(postTop);
-      postTopsEdge2.push(postTop);
-    }
-
-    // Add top wire for Edge 2
-    for (let i = 0; i < postTopsEdge2.length - 1; i++) {
-      fencePoints.push(postTopsEdge2[i]);
-      fencePoints.push(postTopsEdge2[i + 1]);
-    }
-
-    if (fencePoints.length > 0) {
-      const fenceGeometry = new THREE.BufferGeometry().setFromPoints(
-        fencePoints
+    if (bandVertices.length > 0) {
+      const bandGeometry = new THREE.BufferGeometry();
+      bandGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(bandVertices, 3)
       );
-      const fenceLines = new THREE.LineSegments(
-        fenceGeometry,
-        this.fenceMaterial
+      const bandMesh = new THREE.Mesh(bandGeometry, this.fenceMaterial);
+      tile.fenceGroup.add(bandMesh);
+    }
+
+    if (wallVertices.length > 0) {
+      const wallGeometry = new THREE.BufferGeometry();
+      wallGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(wallVertices, 3)
       );
-      tile.fenceGroup.add(fenceLines);
+      const wallMesh = new THREE.Mesh(wallGeometry, this.wallMaterial);
+      tile.fenceGroup.add(wallMesh);
     }
   }
 
@@ -410,8 +481,10 @@ export class TileGridManager {
         }
         if (tile.fenceGroup) {
           tile.fenceGroup.children.forEach((child) => {
-            if (child instanceof THREE.LineSegments) {
-              child.geometry.dispose();
+            if (child instanceof THREE.Mesh) {
+              if (child.geometry) {
+                child.geometry.dispose();
+              }
             }
           });
           this.scene.remove(tile.fenceGroup);
@@ -424,6 +497,9 @@ export class TileGridManager {
     }
     if (this.fenceMaterial) {
       this.fenceMaterial.dispose();
+    }
+    if (this.wallMaterial) {
+      this.wallMaterial.dispose();
     }
   }
 }
