@@ -87,7 +87,7 @@ export class App {
     ambient: null as unknown as THREE.AmbientLight,
     directional: null as unknown as THREE.DirectionalLight,
   };
-  private currentExperiment: RenderingExperiment = new NoopExperiment();
+  private currentExperiment: RenderingExperiment;
   private starField: THREE.Points;
   private fenceParticles: FenceParticleData | null = null; // Renamed and new structure
 
@@ -138,6 +138,24 @@ export class App {
 
     this.tileGridManager = new TileGridManager(this.scene);
     this.cameraController = new CameraController(this.camera, canvas);
+
+    // Initialize currentExperiment to BumpMappingExperiment by default
+    this.currentExperiment = new BumpMappingExperiment(
+      this.scene,
+      this.tileGridManager
+    );
+    const initResult = this.currentExperiment.initialize();
+    if (initResult instanceof Promise) {
+      initResult.catch((error) => {
+        console.error(
+          'Failed to initialize default BumpMappingExperiment:',
+          error
+        );
+        // Fallback to NoopExperiment if default fails
+        this.currentExperiment = new NoopExperiment();
+        this.currentExperiment.initialize();
+      });
+    }
 
     window.addEventListener('resize', this.onWindowResize.bind(this));
 
@@ -483,6 +501,9 @@ export class App {
       option.innerText = exp.name;
       experimentSelect.appendChild(option);
     });
+
+    // Set default selection in dropdown
+    experimentSelect.value = 'bumpMapping';
 
     // Handle experiment change
     experimentSelect.addEventListener('change', (event) => {

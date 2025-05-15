@@ -45,7 +45,7 @@ export class BumpMappingExperiment implements RenderingExperiment {
       this.bumpMaterial = new THREE.MeshStandardMaterial({
         // color can be inherited or set if desired, for now, let it use vertex colors
         bumpMap: this.normalMap,
-        bumpScale: 2.5, // Adjust for desired bumpiness
+        bumpScale: 15.0, // Adjust for desired bumpiness
         // Other properties like roughness, metalness will be inherited from original
         // or can be set here if a completely different look is desired.
       });
