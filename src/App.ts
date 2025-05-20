@@ -43,23 +43,43 @@ const FENCE_PARTICLE_MAX_TRAVEL_TIME = 5.0; // seconds
 // const FENCE_PARTICLE_COLOR = 0xff0000; // Commented out, will use a distinct color for visibility
 const FENCE_PARTICLE_VISIBLE_COLOR = 0xff0000; // Back to Red
 
+// New constants for burst particles
+const FENCE_BURST_PARTICLE_COUNT = 20; // Increased from 5 to 20 (4x)
+const FENCE_BURST_PARTICLE_SCALE_MULTIPLIER = 0.3; // Relative to parent
+const FENCE_BURST_PARTICLE_LIFETIME_MIN = 0.5; // seconds
+const FENCE_BURST_PARTICLE_LIFETIME_MAX = 1.5; // seconds
+const FENCE_BURST_PARTICLE_SPEED_MIN = 2.0; // units per second, for the burst's own explosion speed
+const FENCE_BURST_PARTICLE_SPEED_MAX = 4.0; // units per second, for the burst's own explosion speed
+const FENCE_BURST_RATE_PER_SECOND_PER_PARTICLE = 2.0; // Increased from 0.5 to 2.0 (4x)
+const FENCE_BURST_PARTICLE_COLOR = 0xffff00; // Bright yellow for visibility
+const FENCE_BURST_PARTICLE_GRAVITY = -20.0; // Stronger gravity
+
+// For primary particle spawning
+const FENCE_PRIMARY_SPAWN_RATE_PER_SECOND = 12.5; // Target spawns per second
+const FENCE_SPAWN_CHECK_INTERVAL = 1.0 / 25.0; // Check 25 times per second (matches old interval)
+
 interface FenceParticleData {
   particles: THREE.Mesh[];
   activeCount: number;
   spawnTimer: number;
 
   // Per-particle state
-  states: ('IDLE' | 'GROWING' | 'TRAVELING' | 'SHRINKING')[];
-  animationTimers: number[]; // For grow/shrink
-  targetScales: number[]; // Max scale for this particle (was initialSizes)
+  states: ('IDLE' | 'GROWING' | 'TRAVELING' | 'SHRINKING' | 'BURSTING')[]; // Added 'BURSTING'
+  animationTimers: number[]; // For grow/shrink or burst lifetime
+  targetScales: number[]; // Max scale for this particle
 
   // Travel-specific state
-  travelTargetTileWorldOrigin: THREE.Vector3[]; // Conceptual world origin of the target tile
-  travelPathPoints: THREE.Vector3[][]; // Array of Vector3 for the specific path (local to tile origin)
+  travelTargetTileWorldOrigin: THREE.Vector3[];
+  travelPathPoints: THREE.Vector3[][];
   currentSegmentIndices: number[];
-  progressOnSegments: number[]; // 0-1 progress on current segment
-  travelDurations: number[]; // Total time to travel the full path
-  travelAge: number[]; // How long it has been traveling on current path
+  progressOnSegments: number[];
+  travelDurations: number[];
+  travelAge: number[];
+
+  // Burst-specific state
+  isBurstParticle: boolean[]; // True if this particle is part of a burst
+  burstVelocity: THREE.Vector3[]; // Velocity for burst particles
+  burstParentIndex: (number | null)[]; // Index of the parent particle that spawned this burst
 }
 
 export class App {
@@ -639,19 +659,22 @@ export class App {
     const progressOnSegments: number[] = [];
     const travelDurations: number[] = [];
     const travelAge: number[] = [];
+    const isBurstParticle: boolean[] = [];
+    const burstVelocity: THREE.Vector3[] = [];
+    const burstParentIndex: (number | null)[] = [];
 
-    const sphereGeometry = new THREE.SphereGeometry(1, 8, 8);
+    const sphereGeometry = new THREE.SphereGeometry(1, 6, 6);
 
     for (let i = 0; i < count; i++) {
       const material = new THREE.MeshBasicMaterial({
-        color: FENCE_PARTICLE_VISIBLE_COLOR, // Use distinct white color from higher scope
+        color: FENCE_PARTICLE_VISIBLE_COLOR,
         transparent: true,
-        opacity: 0.9, // Will be controlled by grow/shrink animations
+        opacity: 0.9,
         blending: THREE.AdditiveBlending,
       });
       const sphere = new THREE.Mesh(sphereGeometry, material);
-      sphere.scale.set(0, 0, 0); // Start at size 0
-      sphere.visible = false; // Initially not visible
+      sphere.scale.set(0, 0, 0);
+      sphere.visible = false;
       this.scene.add(sphere);
 
       particles.push(sphere);
@@ -666,6 +689,9 @@ export class App {
       progressOnSegments.push(0);
       travelDurations.push(0);
       travelAge.push(0);
+      isBurstParticle.push(false);
+      burstVelocity.push(new THREE.Vector3());
+      burstParentIndex.push(null);
     }
 
     this.fenceParticles = {
@@ -681,6 +707,9 @@ export class App {
       progressOnSegments,
       travelDurations,
       travelAge,
+      isBurstParticle,
+      burstVelocity,
+      burstParentIndex,
     };
   }
 
@@ -905,6 +934,8 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       progressOnSegments,
       travelDurations,
       travelAge,
+      isBurstParticle,
+      burstVelocity,
     } = this.fenceParticles;
 
     // 1. Update existing active particles
@@ -912,26 +943,31 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
       const particle = particles[i];
       const currentState = states[i];
       animationTimers[i] -= deltaTime;
-      travelAge[i] += currentState === 'TRAVELING' ? deltaTime : 0;
+
+      if (currentState === 'TRAVELING' && !isBurstParticle[i]) {
+        travelAge[i] += deltaTime;
+      }
 
       switch (currentState) {
         case 'GROWING':
+          if (isBurstParticle[i]) {
+            states[i] = 'SHRINKING';
+            animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+            break;
+          }
           const growProgress = Math.max(
             0,
             1 - animationTimers[i] / FENCE_PARTICLE_GROW_TIME
           );
-          const currentTargetScale = targetScales[i]; // Use the stored target scale
+          const currentTargetScale = targetScales[i];
           particle.scale.setScalar(currentTargetScale * growProgress);
-          let currentOpacity = 0;
           if (particle.material instanceof MeshBasicMaterial) {
-            currentOpacity = 0.9 * growProgress;
-            particle.material.opacity = currentOpacity;
+            particle.material.opacity = 0.9 * growProgress;
           }
 
           if (animationTimers[i] <= 0) {
             states[i] = 'TRAVELING';
             travelAge[i] = 0;
-            // Ensure full scale and opacity at end of growth
             particle.scale.setScalar(currentTargetScale);
             if (particle.material instanceof MeshBasicMaterial)
               particle.material.opacity = 0.9;
@@ -939,23 +975,33 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
           break;
 
         case 'TRAVELING':
-          const travelProgress = Math.min(1, travelAge[i] / travelDurations[i]);
-          const path = travelPathPoints[i];
-          if (path && path.length > 1) {
-            const totalSegments = path.length - 1;
-            const targetPointOnPath = travelProgress * totalSegments; // float representing point along total path
+          if (isBurstParticle[i]) {
+            states[i] = 'SHRINKING';
+            animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+            break;
+          }
+
+          let parentVelocityScene = new THREE.Vector3(0, 0, 0);
+          const travelP = travelPathPoints[i];
+
+          if (travelP && travelP.length > 1) {
+            const travelProgress = Math.min(
+              1,
+              travelAge[i] / travelDurations[i]
+            );
+            const totalSegments = travelP.length - 1;
+            const targetPointOnPath = travelProgress * totalSegments;
             currentSegmentIndices[i] = Math.floor(targetPointOnPath);
             progressOnSegments[i] =
               targetPointOnPath - currentSegmentIndices[i];
 
             if (currentSegmentIndices[i] >= totalSegments) {
-              // Reached end of path
               currentSegmentIndices[i] = totalSegments - 1;
               progressOnSegments[i] = 1;
             }
 
-            const pStartLocal = path[currentSegmentIndices[i]];
-            const pEndLocal = path[currentSegmentIndices[i] + 1];
+            const pStartLocal = travelP[currentSegmentIndices[i]];
+            const pEndLocal = travelP[currentSegmentIndices[i] + 1];
 
             if (pStartLocal && pEndLocal) {
               const currentLocalPos = new THREE.Vector3().lerpVectors(
@@ -967,20 +1013,73 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
                 .copy(currentLocalPos)
                 .add(travelTargetTileWorldOrigin[i])
                 .sub(this.worldOriginOffset);
+
+              if (totalSegments > 0 && travelDurations[i] > 0.0001) {
+                const segmentVectorLocal = new THREE.Vector3().subVectors(
+                  pEndLocal,
+                  pStartLocal
+                );
+                const segmentLength = segmentVectorLocal.length();
+                if (segmentLength > 0.0001) {
+                  const timePerSegment = travelDurations[i] / totalSegments;
+                  if (timePerSegment > 0.0001) {
+                    const speedLocal = segmentLength / timePerSegment;
+                    parentVelocityScene
+                      .copy(segmentVectorLocal)
+                      .normalize()
+                      .multiplyScalar(speedLocal);
+                  }
+                }
+              }
             } else {
-              // Should not happen if path is valid
               states[i] = 'SHRINKING';
               animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
             }
           } else {
-            // Path too short or invalid
             states[i] = 'SHRINKING';
             animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+          }
+
+          if (
+            Math.random() <
+            FENCE_BURST_RATE_PER_SECOND_PER_PARTICLE * deltaTime
+          ) {
+            this.spawnBurstParticles(i, parentVelocityScene);
           }
 
           if (travelAge[i] >= travelDurations[i]) {
             states[i] = 'SHRINKING';
             animationTimers[i] = FENCE_PARTICLE_SHRINK_TIME;
+          }
+          break;
+
+        case 'BURSTING':
+          // Apply gravity to the y component of the velocity
+          this.fenceParticles.burstVelocity[i].y +=
+            FENCE_BURST_PARTICLE_GRAVITY * deltaTime;
+
+          // Update particle position using the modified velocity
+          particle.position.addScaledVector(
+            this.fenceParticles.burstVelocity[i],
+            deltaTime
+          );
+
+          const originalBurstLifetime = animationTimers[i] + deltaTime;
+          let burstProgress = 0;
+          if (originalBurstLifetime > 0.0001) {
+            burstProgress = Math.max(
+              0,
+              animationTimers[i] / originalBurstLifetime
+            );
+          }
+          const burstTargetScale = targetScales[i];
+          particle.scale.setScalar(burstTargetScale * burstProgress);
+          if (particle.material instanceof MeshBasicMaterial) {
+            particle.material.opacity = 0.9 * burstProgress;
+          }
+          if (animationTimers[i] <= 0) {
+            this.resetFenceParticle(i);
+            i--;
           }
           break;
 
@@ -992,123 +1091,178 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
           particle.scale.setScalar(targetScales[i] * shrinkProgress);
           if (particle.material instanceof MeshBasicMaterial)
             particle.material.opacity = 0.9 * shrinkProgress;
-
           if (animationTimers[i] <= 0) {
             this.resetFenceParticle(i);
-            i--; // Adjust index due to potential swap in resetParticle
+            i--;
           }
           break;
       }
     }
 
-    // 2. Try to spawn new particles
     this.fenceParticles.spawnTimer += deltaTime;
-    const spawnInterval = 1.0 / 25; // Spawn checks up to 25 times per second (5x original 5/sec)
-    const fixedSpawnAttemptProbability = 0.5;
-
-    if (
-      this.fenceParticles.spawnTimer >= spawnInterval &&
-      this.fenceParticles.activeCount < particles.length &&
-      Math.random() < fixedSpawnAttemptProbability // Use fixed attempt probability
-    ) {
-      this.fenceParticles.spawnTimer = 0;
-
-      // --- View Frustum Culling for Spawn Locations ---
-      const frustum = new THREE.Frustum();
-      const cameraViewProjectionMatrix = new THREE.Matrix4();
-      this.camera.updateMatrixWorld(); // Ensure camera matrices are up-to-date
-      cameraViewProjectionMatrix.multiplyMatrices(
-        this.camera.projectionMatrix,
-        this.camera.matrixWorldInverse
-      );
-      frustum.setFromProjectionMatrix(cameraViewProjectionMatrix);
-      // --- End Frustum Setup ---
-
-      const allActiveTilesWithPaths =
-        this.tileGridManager.getActiveTileFenceData();
-      const visibleTilesWithPaths = allActiveTilesWithPaths.filter(
-        (tileData) => {
-          // Guard 1: Ensure paths object itself exists
-          if (!tileData.paths) {
-            return false;
-          }
-          // Guard 2: Ensure the paths arrays are valid for spawning (at least 2 points for a segment)
-          if (
-            tileData.paths.positiveX.length < 2 &&
-            tileData.paths.positiveZ.length < 2
-          ) {
-            return false;
-          }
-
-          const tileCenterWorld = new THREE.Vector3(
-            tileData.tileWorldOrigin.x + TILE_SIZE / 2,
-            tileData.tileWorldOrigin.y,
-            tileData.tileWorldOrigin.z + TILE_SIZE / 2
-          );
-          const tileCenterInSceneCoords = tileCenterWorld
-            .clone()
-            .sub(this.worldOriginOffset);
-          return frustum.containsPoint(tileCenterInSceneCoords);
-        }
-      );
-
-      if (visibleTilesWithPaths.length === 0) {
-        // console.log("No VISIBLE tiles with paths to spawn particles.");
-        return;
-      }
-
-      const tileData =
-        visibleTilesWithPaths[
-          Math.floor(Math.random() * visibleTilesWithPaths.length)
-        ];
-
-      // Explicit check for tileData.paths to satisfy TypeScript and catch unexpected issues
-      if (!tileData.paths) {
-        console.error(
-          'Critical error: Filtered tileData is missing paths object.',
-          tileData
+    if (this.fenceParticles.spawnTimer >= FENCE_SPAWN_CHECK_INTERVAL) {
+      this.fenceParticles.spawnTimer -= FENCE_SPAWN_CHECK_INTERVAL;
+      if (
+        this.fenceParticles.activeCount < particles.length &&
+        Math.random() <
+          FENCE_PRIMARY_SPAWN_RATE_PER_SECOND * FENCE_SPAWN_CHECK_INTERVAL
+      ) {
+        const frustum = new THREE.Frustum();
+        const cameraViewProjectionMatrix = new THREE.Matrix4();
+        this.camera.updateMatrixWorld();
+        cameraViewProjectionMatrix.multiplyMatrices(
+          this.camera.projectionMatrix,
+          this.camera.matrixWorldInverse
         );
-        return; // Should not happen if filter is correct
+        frustum.setFromProjectionMatrix(cameraViewProjectionMatrix);
+        const allActiveTilesWithPaths =
+          this.tileGridManager.getActiveTileFenceData();
+        const visibleTilesWithPaths = allActiveTilesWithPaths.filter(
+          (tileData) => {
+            if (!tileData.paths) return false;
+            if (
+              tileData.paths.positiveX.length < 2 &&
+              tileData.paths.positiveZ.length < 2
+            )
+              return false;
+            const tileCenterWorld = new THREE.Vector3(
+              tileData.tileWorldOrigin.x + TILE_SIZE / 2,
+              tileData.tileWorldOrigin.y,
+              tileData.tileWorldOrigin.z + TILE_SIZE / 2
+            );
+            const tileCenterInSceneCoords = tileCenterWorld
+              .clone()
+              .sub(this.worldOriginOffset);
+            return frustum.containsPoint(tileCenterInSceneCoords);
+          }
+        );
+        if (visibleTilesWithPaths.length > 0) {
+          const tileData =
+            visibleTilesWithPaths[
+              Math.floor(Math.random() * visibleTilesWithPaths.length)
+            ];
+          if (tileData.paths) {
+            const isXEdge = Math.random() < 0.5;
+            const path = isXEdge
+              ? tileData.paths.positiveX
+              : tileData.paths.positiveZ;
+            if (path && path.length > 1) {
+              const index = this.fenceParticles.activeCount;
+              if (index < particles.length && states[index] === 'IDLE') {
+                states[index] = 'GROWING';
+                isBurstParticle[index] = false;
+                this.fenceParticles.burstParentIndex[index] = null;
+                animationTimers[index] = FENCE_PARTICLE_GROW_TIME;
+                targetScales[index] =
+                  FENCE_PARTICLE_MAX_SCALE * (0.75 + Math.random() * 0.5);
+                particles[index].scale.setScalar(0);
+                particles[index].visible = true;
+                if (particles[index].material instanceof MeshBasicMaterial) {
+                  (particles[index].material as MeshBasicMaterial).color.setHex(
+                    FENCE_PARTICLE_VISIBLE_COLOR
+                  );
+                }
+                travelTargetTileWorldOrigin[index].copy(
+                  tileData.tileWorldOrigin
+                );
+                travelPathPoints[index] = path;
+                currentSegmentIndices[index] = 0;
+                progressOnSegments[index] = 0;
+                travelDurations[index] =
+                  FENCE_PARTICLE_MIN_TRAVEL_TIME +
+                  Math.random() *
+                    (FENCE_PARTICLE_MAX_TRAVEL_TIME -
+                      FENCE_PARTICLE_MIN_TRAVEL_TIME);
+                travelAge[index] = 0;
+                const initialLocalPos = path[0];
+                particles[index].position
+                  .copy(initialLocalPos)
+                  .add(travelTargetTileWorldOrigin[index])
+                  .sub(this.worldOriginOffset);
+                this.fenceParticles.activeCount++;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private spawnBurstParticles(
+    parentIndex: number,
+    parentVelocityScene: THREE.Vector3
+  ): void {
+    if (
+      !this.fenceParticles ||
+      this.fenceParticles.isBurstParticle[parentIndex]
+    ) {
+      return;
+    }
+
+    const parentParticle = this.fenceParticles.particles[parentIndex];
+    const parentMaterial = parentParticle.material as MeshBasicMaterial;
+    const parentColor = parentMaterial.color;
+    const parentCurrentScale = parentParticle.scale.x;
+
+    for (let i = 0; i < FENCE_BURST_PARTICLE_COUNT; i++) {
+      if (
+        this.fenceParticles.activeCount >= this.fenceParticles.particles.length
+      ) {
+        break;
       }
 
-      const isXEdge = Math.random() < 0.5;
-      // Now tileData.paths is guaranteed to be defined here by the check above
-      const path = isXEdge
-        ? tileData.paths.positiveX
-        : tileData.paths.positiveZ;
-
-      if (path && path.length > 1) {
-        const index = this.fenceParticles.activeCount;
+      const burstIndex = this.fenceParticles.activeCount;
+      if (this.fenceParticles.states[burstIndex] === 'IDLE') {
         this.fenceParticles.activeCount++;
 
-        states[index] = 'GROWING';
-        animationTimers[index] = FENCE_PARTICLE_GROW_TIME;
-        particles[index].scale.setScalar(0);
-        particles[index].visible = true;
+        this.fenceParticles.states[burstIndex] = 'BURSTING';
+        this.fenceParticles.isBurstParticle[burstIndex] = true;
+        this.fenceParticles.burstParentIndex[burstIndex] = parentIndex;
 
-        // Ensure color is set correctly; opacity will be handled by GROWING state.
-        if (particles[index].material instanceof MeshBasicMaterial) {
-          (particles[index].material as MeshBasicMaterial).color.setHex(
-            FENCE_PARTICLE_VISIBLE_COLOR
-          );
-          // Opacity starts at material default (0.9) but GROWING state will immediately multiply by growProgress (near 0)
-        }
-
-        travelTargetTileWorldOrigin[index].copy(tileData.tileWorldOrigin);
-        travelPathPoints[index] = path;
-        currentSegmentIndices[index] = 0;
-        progressOnSegments[index] = 0;
-        travelDurations[index] =
-          FENCE_PARTICLE_MIN_TRAVEL_TIME +
+        const lifetime =
+          FENCE_BURST_PARTICLE_LIFETIME_MIN +
           Math.random() *
-            (FENCE_PARTICLE_MAX_TRAVEL_TIME - FENCE_PARTICLE_MIN_TRAVEL_TIME);
-        travelAge[index] = 0;
+            (FENCE_BURST_PARTICLE_LIFETIME_MAX -
+              FENCE_BURST_PARTICLE_LIFETIME_MIN);
+        this.fenceParticles.animationTimers[burstIndex] = lifetime;
 
-        const initialLocalPos = path[0];
-        particles[index].position
-          .copy(initialLocalPos)
-          .add(travelTargetTileWorldOrigin[index])
-          .sub(this.worldOriginOffset);
+        const burstParticleMesh = this.fenceParticles.particles[burstIndex];
+        burstParticleMesh.position.copy(parentParticle.position);
+
+        const burstTargetScale =
+          parentCurrentScale * FENCE_BURST_PARTICLE_SCALE_MULTIPLIER;
+        this.fenceParticles.targetScales[burstIndex] = burstTargetScale;
+        burstParticleMesh.scale.setScalar(burstTargetScale);
+
+        if (burstParticleMesh.material instanceof MeshBasicMaterial) {
+          burstParticleMesh.material.color.setHex(FENCE_BURST_PARTICLE_COLOR); // Set to bright yellow
+          burstParticleMesh.material.opacity = 0.9;
+        }
+        burstParticleMesh.visible = true;
+
+        const randomBurstSpeed =
+          FENCE_BURST_PARTICLE_SPEED_MIN +
+          Math.random() *
+            (FENCE_BURST_PARTICLE_SPEED_MAX - FENCE_BURST_PARTICLE_SPEED_MIN);
+
+        const randomBurstDirection = new THREE.Vector3(
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2
+        ).normalize();
+
+        this.fenceParticles.burstVelocity[burstIndex]
+          .copy(randomBurstDirection)
+          .multiplyScalar(randomBurstSpeed)
+          .add(parentVelocityScene);
+
+        this.fenceParticles.travelPathPoints[burstIndex] = [];
+        this.fenceParticles.travelAge[burstIndex] = 0;
+        this.fenceParticles.travelDurations[burstIndex] = 0;
+        this.fenceParticles.currentSegmentIndices[burstIndex] = 0;
+        this.fenceParticles.progressOnSegments[burstIndex] = 0;
+      } else {
+        break;
       }
     }
   }
@@ -1118,19 +1272,25 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
     const fp = this.fenceParticles;
 
     const lastActiveIndex = fp.activeCount - 1;
-    if (index < 0 || index > lastActiveIndex) return; // Should not happen
+    if (index < 0 || index > lastActiveIndex) {
+      return;
+    }
 
     fp.particles[index].visible = false;
     fp.particles[index].scale.setScalar(0);
+    if (fp.particles[index].material instanceof MeshBasicMaterial) {
+      fp.particles[index].material.opacity = 0;
+    }
     fp.states[index] = 'IDLE';
-    fp.travelPathPoints[index] = []; // Clear path reference
+    fp.travelPathPoints[index] = [];
+    fp.isBurstParticle[index] = false;
+    fp.burstVelocity[index].set(0, 0, 0);
+    fp.burstParentIndex[index] = null;
 
     if (index === lastActiveIndex) {
       fp.activeCount--;
     } else {
-      // Swap with the last active particle
       const propsToSwap: (keyof FenceParticleData)[] = [
-        'particles',
         'states',
         'animationTimers',
         'targetScales',
@@ -1140,13 +1300,22 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
         'progressOnSegments',
         'travelDurations',
         'travelAge',
+        'isBurstParticle',
+        'burstVelocity',
+        'burstParentIndex',
       ];
 
+      const tempParticleMesh = fp.particles[index];
+      fp.particles[index] = fp.particles[lastActiveIndex];
+      fp.particles[lastActiveIndex] = tempParticleMesh;
+
       for (const prop of propsToSwap) {
-        const p = prop as any;
-        const temp = (fp as any)[p][index];
-        (fp as any)[p][index] = (fp as any)[p][lastActiveIndex];
-        (fp as any)[p][lastActiveIndex] = temp;
+        const p = prop as keyof FenceParticleData;
+        if (Array.isArray((fp as any)[p])) {
+          const temp = (fp as any)[p][index];
+          (fp as any)[p][index] = (fp as any)[p][lastActiveIndex];
+          (fp as any)[p][lastActiveIndex] = temp;
+        }
       }
       fp.activeCount--;
     }
@@ -1165,7 +1334,6 @@ Height: ${this.controls.height.toFixed(2)} (R/F)
           particle.material.dispose();
         }
       });
-      // Nullify to prevent further use
       this.fenceParticles = null;
     }
 
